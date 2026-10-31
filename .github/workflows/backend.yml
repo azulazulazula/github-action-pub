@@ -23,7 +23,7 @@ jobs:
       - run: npm run build
 
       - uses: actions/upload-artifact@v4
-        if: allways()
+        if: always()
         with:
           name: azula-artifact
           path: backend/coverage/**
