@@ -1,1 +1,2 @@
 # github-action-pub
+[![backend](https://github.com/azulazulazula/github-action-pub/actions/workflows/backend.yml/badge.svg)](https://github.com/azulazulazula/github-action-pub/actions/workflows/backend.yml)
