@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon",
     "test": "jest",
-    "build": "ncc build"
+    "build": "ncc build",
+    "test:api": "npx stepci run ./stepci/warkflow.yaml"
   },
   "author": "",
   "license": "ISC",
