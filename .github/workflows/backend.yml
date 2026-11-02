@@ -38,6 +38,7 @@ jobs:
           name: dist
           path: backend/dist/index.js
           retention-days: 10
+          
 deploy:
   needs: build
   if : github.event_name == 'push'
