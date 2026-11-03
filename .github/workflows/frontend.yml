@@ -17,4 +17,4 @@ jobs:
       - run: aws s3 sync . s3://amzn-github-action-test-azula --exact-timestamps
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.ACC_ID }}
-          AWS_SECRET_ACCESS_KEY_ID: ${{ secrets.SEC_ACC_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SEC_ACC_ID }}
