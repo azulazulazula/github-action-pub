@@ -1,0 +1,16 @@
+name: frontend
+
+on:
+  push:
+    branches:
+      - main
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: aws s3 sync . s3://amzn-github-action-test-azula --profile chapi-aws --exact-timestamps
