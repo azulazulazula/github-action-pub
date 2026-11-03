@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    pathes:
+      - 'frontend/**'
+      - '.github/**'
 
 permissions:
   id-token: write
