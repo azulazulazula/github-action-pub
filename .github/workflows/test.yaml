@@ -13,13 +13,3 @@ jobs:
     steps:
       - name: Run test action
         run: echo "workflow_dispatch completed"
-
-      - name: Notify Slack
-        if: ${{ always() }}
-        uses: slackapi/slack-github-action@v4.0.0
-        with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          errors: true
-          payload: |
-            text: "GitHub Actions: ${{ job.status }} — ${{ github.repository }} / ${{ github.workflow }} (<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|実行結果>)"

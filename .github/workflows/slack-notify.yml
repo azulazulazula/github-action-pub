@@ -1,0 +1,31 @@
+name: Notify Slack when a workflow completes
+
+on:
+  workflow_run:
+    workflows:
+      - Slack notification test
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out notification script
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Query GitHub API and notify Slack
+        run: node .github/scripts/notify-slack.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TARGET_RUN_ID: ${{ github.event.workflow_run.id }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
