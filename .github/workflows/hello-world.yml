@@ -1,0 +1,17 @@
+name: Hello World on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Say hello
+        run: echo "Hello, world!"
