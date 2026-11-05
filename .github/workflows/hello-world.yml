@@ -1,7 +1,7 @@
-name: Hello World on PR
+name: Hello World on main update
 
 on:
-  pull_request:
+  push:
     branches:
       - main
 
