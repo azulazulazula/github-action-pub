@@ -1,5 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Prototype EC2 instance in the default VPC
+Description: Prototype EC2 instance in the dedicated prototype VPC
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
 
 Parameters:
   AmiId:
@@ -24,6 +28,11 @@ Resources:
 
   Instance:
     Type: AWS::EC2::Instance
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: propagate the instance Name tag to its EBS root volume for identification
+        must:
+          - Keep root-volume tags consistent with the instance Tags property
     Properties:
       ImageId: !Ref AmiId
       InstanceType: t4g.micro
@@ -37,6 +46,7 @@ Resources:
           DeleteOnTermination: true
       MetadataOptions:
         HttpTokens: required
+      PropagateTagsToVolumeOnCreation: true
       Tags:
         - Key: Name
           Value: eiei-mun-ec2-prototype

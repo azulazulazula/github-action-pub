@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/cfm/**'
+      - '.github/workflows/cfm/ec2.yml'
       - '.github/workflows/deploy-ec2.yml'
   workflow_dispatch:
 
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     environment: prod
     steps:
       - name: Check out repository
@@ -27,21 +27,20 @@ jobs:
           aws-region: ap-south-1
           allowed-account-ids: "798452926315"
 
-      - name: Find default VPC, subnet, and latest AL2023 ARM64 AMI
+      - name: Read prototype VPC outputs and find latest AL2023 ARM64 AMI
         id: discover
         run: |
           set -euo pipefail
 
-          VPC_ID=$(aws ec2 describe-vpcs \
-            --filters Name=isDefault,Values=true \
-            --query 'Vpcs[0].VpcId' --output text)
+          VPC_ID=$(aws cloudformation describe-stacks \
+            --stack-name eiei-mun-vpc-prototype \
+            --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue | [0]" \
+            --output text)
           test "$VPC_ID" != "None"
 
-          SUBNET_ID=$(aws ec2 describe-subnets \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-                      Name=default-for-az,Values=true \
-                      Name=state,Values=available \
-            --query 'sort_by(Subnets,&AvailabilityZone)[0].SubnetId' \
+          SUBNET_ID=$(aws cloudformation describe-stacks \
+            --stack-name eiei-mun-vpc-prototype \
+            --query "Stacks[0].Outputs[?OutputKey=='PublicSubnetId'].OutputValue | [0]" \
             --output text)
           test "$SUBNET_ID" != "None"
 
