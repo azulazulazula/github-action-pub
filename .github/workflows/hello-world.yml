@@ -1,0 +1,19 @@
+name: Hello World on main update
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.github/**'
+
+permissions:
+  contents: read
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Say hello
+        run: echo "Hello, world!"
