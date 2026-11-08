@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/cfm/vpc/**'
-      - '.github/workflows/cfm/ec2.yml'
-      - '.github/workflows/create-vpc.yml'
-      - '.github/workflows/deploy-ec2.yml'
-      - '.github/workflows/deploy-prototype.yml'
+      - '.github/workflows/cfm/**'
+      - '.github/workflows/create-*.yml'
+      - '.github/workflows/deploy-*.yml'
+      - '.github/workflows/*-prototype.yml'
+      - '.github/workflows/deploy-paths.yml'
   workflow_dispatch:
 
 permissions:
@@ -16,9 +16,28 @@ permissions:
   id-token: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      vpc: ${{ steps.filter.outputs.vpc }}
+      ec2: ${{ steps.filter.outputs.ec2 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Detect changed services
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          base: ${{ github.ref }}
+          filters: .github/workflows/deploy-paths.yml
+
   create-vpc:
+    needs: changes
+    if: ${{ always() && needs.changes.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.vpc == 'true') }}
     uses: ./.github/workflows/create-vpc.yml
 
   deploy-ec2:
-    needs: create-vpc
+    needs: [changes, create-vpc]
+    if: ${{ always() && needs.changes.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.ec2 == 'true') && (needs.create-vpc.result == 'success' || needs.create-vpc.result == 'skipped') }}
     uses: ./.github/workflows/deploy-ec2.yml
