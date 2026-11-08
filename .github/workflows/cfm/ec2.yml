@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Prototype EC2 instance in the default VPC
+
+Parameters:
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Latest Amazon Linux 2023 ARM64 AMI
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+Resources:
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Prototype instance security group with no inbound rules
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: eiei-mun-ec2-prototype
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t4g.micro
+      KeyName: eiei-mun
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          SubnetId: !Ref SubnetId
+          GroupSet:
+            - !Ref InstanceSecurityGroup
+          AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+      MetadataOptions:
+        HttpTokens: required
+      Tags:
+        - Key: Name
+          Value: eiei-mun-ec2-prototype
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  PublicIp:
+    Value: !GetAtt Instance.PublicIp

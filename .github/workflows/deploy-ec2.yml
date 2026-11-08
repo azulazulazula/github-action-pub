@@ -1,0 +1,84 @@
+name: Deploy EC2 prototype
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cfm/**'
+      - '.github/workflows/deploy-ec2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
+          aws-region: ap-south-1
+          allowed-account-ids: "798452926315"
+
+      - name: Find default VPC, subnet, and latest AL2023 ARM64 AMI
+        id: discover
+        run: |
+          set -euo pipefail
+
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters Name=isDefault,Values=true \
+            --query 'Vpcs[0].VpcId' --output text)
+          test "$VPC_ID" != "None"
+
+          SUBNET_ID=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+                      Name=default-for-az,Values=true \
+                      Name=state,Values=available \
+            --query 'sort_by(Subnets,&AvailabilityZone)[0].SubnetId' \
+            --output text)
+          test "$SUBNET_ID" != "None"
+
+          AMI_ID=$(aws ec2 describe-images \
+            --owners amazon \
+            --filters Name=name,Values='al2023-ami-2023.*-kernel-*-arm64' \
+                      Name=architecture,Values=arm64 \
+                      Name=state,Values=available \
+            --query 'sort_by(Images,&CreationDate)[-1].ImageId' \
+            --output text)
+          test "$AMI_ID" != "None"
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "subnet_id=$SUBNET_ID" >> "$GITHUB_OUTPUT"
+          echo "ami_id=$AMI_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Validate and deploy CloudFormation stack
+        env:
+          VPC_ID: ${{ steps.discover.outputs.vpc_id }}
+          SUBNET_ID: ${{ steps.discover.outputs.subnet_id }}
+          AMI_ID: ${{ steps.discover.outputs.ami_id }}
+        run: |
+          set -euo pipefail
+
+          aws cloudformation validate-template \
+            --template-body file://.github/workflows/cfm/ec2.yml
+
+          aws cloudformation deploy \
+            --template-file .github/workflows/cfm/ec2.yml \
+            --stack-name eiei-mun-ec2-prototype \
+            --parameter-overrides \
+              AmiId="$AMI_ID" \
+              VpcId="$VPC_ID" \
+              SubnetId="$SUBNET_ID" \
+            --no-fail-on-empty-changeset
+
+          aws cloudformation describe-stacks \
+            --stack-name eiei-mun-ec2-prototype \
+            --query 'Stacks[0].Outputs' \
+            --output table
