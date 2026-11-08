@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Prototype network for the EC2 workload — uses one public subnet and no NAT gateway to keep the network simple and avoid NAT charges.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Resources:
+  PrototypeVpc:
+    Type: AWS::EC2::VPC
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: isolated network for the EC2 prototype; DNS support enables standard AWS name resolution
+        must:
+          - CIDR must not overlap networks connected to this VPC
+        mutable: review-required
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: eiei-mun-vpc-prototype
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: provides internet routing for the single public subnet; no NAT gateway is created
+        must:
+          - attach only to PrototypeVpc
+    Properties:
+      Tags:
+        - Key: Name
+          Value: eiei-mun-vpc-prototype-igw
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: connects the internet gateway to the prototype VPC
+        must:
+          - keep attached to PrototypeVpc and InternetGateway
+    Properties:
+      VpcId: !Ref PrototypeVpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: one public subnet in the first AZ returned for the deployment region; sized as /24 from the selected /16 VPC CIDR
+        must:
+          - remain inside PrototypeVpc CIDR
+        mutable: review-required
+    Properties:
+      VpcId: !Ref PrototypeVpc
+      CidrBlock: !Select [0, !Cidr [10.0.0.0/16, 1, 8]]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: eiei-mun-vpc-prototype-public
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: route table for the public subnet
+    Properties:
+      VpcId: !Ref PrototypeVpc
+      Tags:
+        - Key: Name
+          Value: eiei-mun-vpc-prototype-public
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: sends IPv4 internet-bound traffic from the public subnet through the internet gateway
+        must:
+          - default route must target the attached InternetGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: makes the subnet use the public route table
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+Outputs:
+  VpcId:
+    Description: ID of the prototype VPC
+    Value: !Ref PrototypeVpc
+
+  PublicSubnetId:
+    Description: ID of the public subnet for the EC2 prototype
+    Value: !Ref PublicSubnet
+
+  AvailabilityZone:
+    Description: Availability Zone selected for the public subnet
+    Value: !GetAtt PublicSubnet.AvailabilityZone

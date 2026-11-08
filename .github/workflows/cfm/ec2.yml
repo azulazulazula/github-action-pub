@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Prototype EC2 instance in the default VPC
+Description: Prototype EC2 instance in the dedicated prototype VPC
 
 Parameters:
   AmiId:
