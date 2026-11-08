@@ -8,7 +8,7 @@ on:
       - '.github/workflows/create-*.yml'
       - '.github/workflows/deploy-*.yml'
       - '.github/workflows/*-prototype.yml'
-      - '.github/workflows/deploy-paths.yml'
+      - '.github/filters/deploy-paths.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +30,7 @@ jobs:
         uses: dorny/paths-filter@v4
         with:
           base: ${{ github.ref }}
-          filters: .github/workflows/deploy-paths.yml
+          filters: .github/filters/deploy-paths.yml
 
   create-vpc:
     needs: changes
