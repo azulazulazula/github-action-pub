@@ -3,6 +3,9 @@ name: Deploy EC2 prototype
 on:
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/cfm/**'
+      - '.github/workflows/deploy-ec2.yml'
   workflow_dispatch:
 
 permissions:
@@ -55,19 +58,8 @@ jobs:
           echo "subnet_id=$SUBNET_ID" >> "$GITHUB_OUTPUT"
           echo "ami_id=$AMI_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Validate SSH_CIDR
-        env:
-          SSH_CIDR: ${{ secrets.SSH_CIDR }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$SSH_CIDR" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/32$ ]]; then
-            echo "SSH_CIDR must be one IPv4 address followed by /32."
-            exit 1
-          fi
-
       - name: Validate and deploy CloudFormation stack
         env:
-          SSH_CIDR: ${{ secrets.SSH_CIDR }}
           VPC_ID: ${{ steps.discover.outputs.vpc_id }}
           SUBNET_ID: ${{ steps.discover.outputs.subnet_id }}
           AMI_ID: ${{ steps.discover.outputs.ami_id }}
@@ -75,16 +67,15 @@ jobs:
           set -euo pipefail
 
           aws cloudformation validate-template \
-            --template-body file://infra/ec2.yml
+            --template-body file://.github/workflows/cfm/ec2.yml
 
           aws cloudformation deploy \
-            --template-file infra/ec2.yml \
+            --template-file .github/workflows/cfm/ec2.yml \
             --stack-name eiei-mun-ec2-prototype \
             --parameter-overrides \
               AmiId="$AMI_ID" \
               VpcId="$VPC_ID" \
               SubnetId="$SUBNET_ID" \
-              SshCidr="$SSH_CIDR" \
             --no-fail-on-empty-changeset
 
           aws cloudformation describe-stacks \
