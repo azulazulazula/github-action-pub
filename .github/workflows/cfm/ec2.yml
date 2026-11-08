@@ -12,24 +12,12 @@ Parameters:
   SubnetId:
     Type: AWS::EC2::Subnet::Id
 
-  SshCidr:
-    Type: String
-    Description: Your public IPv4 address with /32, stored as GitHub secret SSH_CIDR
-    AllowedPattern: '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/32$'
-    ConstraintDescription: Enter one IPv4 address followed by /32.
-
 Resources:
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: SSH from the configured client IP
+      GroupDescription: Prototype instance security group with no inbound rules
       VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - Description: SSH from configured client IP
-          IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: !Ref SshCidr
       Tags:
         - Key: Name
           Value: eiei-mun-ec2-prototype
