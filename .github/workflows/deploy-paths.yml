@@ -1,0 +1,10 @@
+vpc:
+  - '.github/workflows/cfm/vpc/**'
+  - '.github/workflows/create-vpc.yml'
+  - '.github/workflows/deploy-prototype.yml'
+  - '.github/workflows/deploy-paths.yml'
+ec2:
+  - '.github/workflows/cfm/ec2.yml'
+  - '.github/workflows/deploy-ec2.yml'
+  - '.github/workflows/deploy-prototype.yml'
+  - '.github/workflows/deploy-paths.yml'
