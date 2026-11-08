@@ -4,12 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: Select yes to delete the eiei-mun-ec2-prototype stack
-        type: choice
-        options:
-          - no
-          - yes
-        default: no
+        description: Confirm deletion of the eiei-mun-ec2-prototype stack
+        type: boolean
+        default: false
         required: true
 
 permissions:
@@ -18,7 +15,7 @@ permissions:
 
 jobs:
   delete:
-    if: ${{ inputs.confirm == 'yes' }}
+    if: ${{ inputs.confirm }}
     runs-on: ubuntu-latest
     environment: prod
     steps:
