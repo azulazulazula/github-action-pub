@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - 'frontend/**'
-      - '.github/**'
+      - '.github/workflows/frontend.yml'
 
 permissions:
   id-token: write
