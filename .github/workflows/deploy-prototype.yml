@@ -1,0 +1,24 @@
+name: Deploy VPC and EC2 prototype
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cfm/vpc/**'
+      - '.github/workflows/cfm/ec2.yml'
+      - '.github/workflows/create-vpc.yml'
+      - '.github/workflows/deploy-ec2.yml'
+      - '.github/workflows/deploy-prototype.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  create-vpc:
+    uses: ./.github/workflows/create-vpc.yml
+
+  deploy-ec2:
+    needs: create-vpc
+    uses: ./.github/workflows/deploy-ec2.yml
