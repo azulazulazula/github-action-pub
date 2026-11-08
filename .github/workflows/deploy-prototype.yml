@@ -34,7 +34,7 @@ jobs:
 
   create-vpc:
     needs: changes
-    if: ${{ always() && needs.changes.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.vpc == 'true') }}
+    if: ${{ always() && needs.changes.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.vpc == 'true' || needs.changes.outputs.ec2 == 'true') }}
     uses: ./.github/workflows/create-vpc.yml
 
   deploy-ec2:
