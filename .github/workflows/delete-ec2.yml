@@ -1,0 +1,38 @@
+name: Delete EC2 prototype
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Select yes to delete the eiei-mun-ec2-prototype stack
+        type: choice
+        options:
+          - no
+          - yes
+        default: no
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  delete:
+    if: ${{ inputs.confirm == 'yes' }}
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
+          aws-region: ap-south-1
+          allowed-account-ids: "798452926315"
+
+      - name: Delete stack
+        run: |
+          set -euo pipefail
+          aws cloudformation delete-stack \
+            --stack-name eiei-mun-ec2-prototype
+          aws cloudformation wait stack-delete-complete \
+            --stack-name eiei-mun-ec2-prototype
