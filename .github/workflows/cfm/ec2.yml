@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Prototype EC2 instance in the dedicated prototype VPC
+# Test trigger: validate EC2 deployment with its VPC prerequisite.
 
 Metadata:
   AWSToolsMetrics:
