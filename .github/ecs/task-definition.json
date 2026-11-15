@@ -1,7 +1,9 @@
 {
   "family": "hello-world",
   "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
   "cpu": "256",
   "memory": "512",
   "executionRoleArn": "arn:aws:iam::798452926315:role/ecsTaskExecutionRole",
@@ -22,7 +24,20 @@
           "protocol": "tcp",
           "appProtocol": "http"
         }
-      ]
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "java",
+          "-cp",
+          "/app/hello-world.jar",
+          "hello.HealthCheck"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      }
     }
   ]
 }
