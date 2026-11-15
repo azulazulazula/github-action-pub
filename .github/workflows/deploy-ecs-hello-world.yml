@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'Dockerfile'
+      - 'src/**'
+      - '.github/ecs/**'
+      - '.github/workflows/deploy-ecs-hello-world.yml'
   workflow_dispatch:
 
 permissions:
