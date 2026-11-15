@@ -19,7 +19,7 @@ Resources:
           - Preserve TLS-only access in BucketPolicy
         mutable: review-required
     Properties:
-      BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}"
+      BucketName: !Sub "${AWS::StackName}-test-${AWS::AccountId}-${AWS::Region}"
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
