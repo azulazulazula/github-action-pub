@@ -105,7 +105,7 @@ jobs:
             exit 1
           fi
           FROM_NAME="${FROM_IMAGE%:*}"
-          jq --arg value "$FROM_NAME" '.tags = ((.tags // []) + [{"key":"from","value":$value}])' \
+          jq --arg value "${FROM_NAME}:${GITHUB_SHA}" '.tags = ((.tags // []) + [{"key":"from","value":$value}])' \
             "$TASK_DEFINITION" > build/task-definition.json
 
       - name: Render task definition
