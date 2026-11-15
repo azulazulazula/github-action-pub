@@ -1,35 +1,20 @@
 #!/usr/bin/env python3
-"""Build an ordered deployment plan from changed paths and dependencies.yaml."""
+"""Create an ordered deploy-plan.json from changed paths and dependency.yml."""
 
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-RESOURCE_FILES = {
-    "vpc": {
-        "workflow": ".github/workflows/create-vpc.yml",
-        "template": ".github/workflows/cfm/vpc/vpc.yml",
-    },
-    "s3": {
-        "workflow": ".github/workflows/create-s3.yml",
-        "template": ".github/workflows/cfm/s3/s3.yml",
-    },
-    "ec2": {
-        "workflow": ".github/workflows/deploy-ec2.yml",
-        "template": ".github/workflows/cfm/ec2.yml",
-    },
-    "ecs": {
-        "workflow": ".github/workflows/deploy-ecs-hello-world.yml",
-        "template": None,
-    },
-}
+MANIFEST_PATH = Path(".github/deploy/dependency.yml")
 
 
 def changed_paths(before: str, after: str) -> list[str]:
@@ -41,54 +26,56 @@ def changed_paths(before: str, after: str) -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def resource_for_path(path: str) -> str | None:
-    if path.startswith(".github/workflows/cfm/vpc/"):
-        return "vpc"
-    if path == ".github/workflows/cfm/ec2.yml":
-        return "ec2"
-    if path.startswith(".github/workflows/cfm/s3/"):
-        return "s3"
-    if path == "Dockerfile" or path.startswith("src/") or path.startswith(".github/ecs/"):
-        return "ecs"
-    return None
-
-
-def load_graph(path: Path) -> dict[str, list[str]]:
+def load_resources(path: Path) -> dict[str, dict[str, Any]]:
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         raise ValueError(f"Cannot read {path}: {error}") from error
 
-    if not isinstance(document, dict) or not isinstance(document.get("dependencies"), dict):
-        raise ValueError(f"{path} must contain a 'dependencies' mapping")
+    resources = document.get("resources") if isinstance(document, dict) else None
+    if not isinstance(resources, dict) or not resources:
+        raise ValueError(f"{path} must contain a non-empty 'resources' mapping")
 
-    graph = document["dependencies"]
-    if set(graph) != set(RESOURCE_FILES):
-        missing = sorted(set(RESOURCE_FILES) - set(graph))
-        unknown = sorted(set(graph) - set(RESOURCE_FILES))
-        raise ValueError(f"Invalid resources in {path}; missing={missing}, unsupported={unknown}")
+    for name, definition in resources.items():
+        if not isinstance(name, str) or not isinstance(definition, dict):
+            raise ValueError("Resource names must map to resource definition objects")
 
-    for resource, dependencies in graph.items():
+        paths = definition.get("paths")
+        dependencies = definition.get("depends_on")
+        workflow = definition.get("workflow")
+        template = definition.get("template")
+
+        if not isinstance(paths, list) or not paths or not all(isinstance(item, str) for item in paths):
+            raise ValueError(f"'{name}.paths' must be a non-empty list of path patterns")
         if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
-            raise ValueError(f"Dependencies for '{resource}' must be a list of resource names")
+            raise ValueError(f"'{name}.depends_on' must be a list of resource names")
         if len(dependencies) != len(set(dependencies)):
-            raise ValueError(f"Duplicate dependency listed for '{resource}'")
-        unknown = sorted(set(dependencies) - set(graph))
+            raise ValueError(f"Duplicate dependency listed for '{name}'")
+        if not isinstance(workflow, str) or not workflow.startswith(".github/workflows/"):
+            raise ValueError(f"'{name}.workflow' must point to a workflow under .github/workflows/")
+        if template is not None and not isinstance(template, str):
+            raise ValueError(f"'{name}.template' must be a path string or null")
+
+    for name, definition in resources.items():
+        unknown = sorted(set(definition["depends_on"]) - set(resources))
         if unknown:
-            raise ValueError(f"Unknown dependencies for '{resource}': {unknown}")
+            raise ValueError(f"Unknown dependencies for '{name}': {unknown}")
 
-    return graph
+    return resources
 
 
-def topological_order(graph: dict[str, list[str]]) -> list[str]:
-    pending = list(graph)
+def topological_order(resources: dict[str, dict[str, Any]]) -> list[str]:
+    pending = list(resources)
     completed: set[str] = set()
     result: list[str] = []
 
     while pending:
-        ready = next((name for name in pending if set(graph[name]) <= completed), None)
+        ready = next(
+            (name for name in pending if set(resources[name]["depends_on"]) <= completed),
+            None,
+        )
         if ready is None:
-            raise ValueError("Dependency cycle detected in dependencies.yaml")
+            raise ValueError(f"Dependency cycle detected in {MANIFEST_PATH}")
         pending.remove(ready)
         completed.add(ready)
         result.append(ready)
@@ -96,14 +83,16 @@ def topological_order(graph: dict[str, list[str]]) -> list[str]:
     return result
 
 
-def include_prerequisites(graph: dict[str, list[str]], requested: set[str]) -> set[str]:
+def include_prerequisites(
+    resources: dict[str, dict[str, Any]], requested: set[str]
+) -> set[str]:
     selected: set[str] = set()
 
     def include(resource: str) -> None:
         if resource in selected:
             return
         selected.add(resource)
-        for dependency in graph[resource]:
+        for dependency in resources[resource]["depends_on"]:
             include(dependency)
 
     for resource in requested:
@@ -120,26 +109,31 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
-    graph = load_graph(Path(".github/deploy/dependencies.yaml"))
-    ordered_all = topological_order(graph)
+    resources = load_resources(MANIFEST_PATH)
+    ordered_all = topological_order(resources)
+    files = changed_paths(args.before, args.after)
 
     changed = {
-        resource
-        for path in changed_paths(args.before, args.after)
-        if (resource := resource_for_path(path)) is not None
+        name
+        for name, definition in resources.items()
+        if any(
+            fnmatch.fnmatchcase(path, pattern)
+            for path in files
+            for pattern in definition["paths"]
+        )
     }
-    selected = include_prerequisites(graph, changed)
-    ordered = [resource for resource in ordered_all if resource in selected]
+    selected = include_prerequisites(resources, changed)
+    ordered = [name for name in ordered_all if name in selected]
 
     steps = []
-    for resource in ordered:
-        definition = RESOURCE_FILES[resource]
+    for name in ordered:
+        definition = resources[name]
         steps.append(
             {
-                "resource": resource,
+                "resource": name,
                 "workflow": definition["workflow"],
-                "template": definition["template"],
-                "request_id": f"{args.run_id}-{args.run_attempt}-{resource}",
+                "template": definition.get("template"),
+                "request_id": f"{args.run_id}-{args.run_attempt}-{name}",
                 "status": "pending",
             }
         )
@@ -147,7 +141,7 @@ def main() -> int:
     plan = {
         "schema_version": 1,
         "source_commit": args.after,
-        "changed_resources": [resource for resource in ordered_all if resource in changed],
+        "changed_resources": [name for name in ordered_all if name in changed],
         "deploy_order": ordered,
         "steps": steps,
         "status": "pending" if steps else "no_changes",
