@@ -1,0 +1,32 @@
+# Resource definitions, change paths, and deployment dependencies.
+resources:
+  vpc:
+    paths:
+      - .github/workflows/cfm/vpc/**
+    depends_on: []
+    workflow: .github/workflows/create-vpc.yml
+    template: .github/workflows/cfm/vpc/vpc.yml
+
+  s3:
+    paths:
+      - .github/workflows/cfm/s3/**
+    depends_on: []
+    workflow: .github/workflows/create-s3.yml
+    template: .github/workflows/cfm/s3/s3.yml
+
+  ec2:
+    paths:
+      - .github/workflows/cfm/ec2.yml
+    depends_on:
+      - vpc
+    workflow: .github/workflows/deploy-ec2.yml
+    template: .github/workflows/cfm/ec2.yml
+
+  ecs:
+    paths:
+      - Dockerfile
+      - src/**
+      - .github/ecs/**
+    depends_on: []
+    workflow: .github/workflows/deploy-ecs-hello-world.yml
+    template: null
