@@ -1,4 +1,4 @@
-name: Deploy changed AWS resources by dependency
+name: Orchestrate AWS resource deployments
 
 on:
   push:
@@ -12,25 +12,11 @@ on:
       - '.github/ecs/**'
       - '.github/deploy/dependencies.yaml'
       - '.github/scripts/resolve-dependencies.rb'
-      - '.github/scripts/deploy-resource.sh'
       - '.github/workflows/deploy-aws-resources.yml'
-  workflow_dispatch:
-    inputs:
-      resource:
-        description: Deploy all resources or one selected resource
-        type: choice
-        options:
-          - all
-          - vpc
-          - s3
-          - ec2
-          - ecs
-        default: all
-        required: true
 
 permissions:
   contents: read
-  id-token: write
+  actions: write
 
 concurrency:
   group: deploy-aws-resources-main
@@ -38,7 +24,7 @@ concurrency:
   queue: max
 
 jobs:
-  deploy:
+  orchestrate:
     runs-on: ubuntu-22.04
     environment: prod
     steps:
@@ -56,56 +42,46 @@ jobs:
         id: detect
         env:
           EVENT_BEFORE: ${{ github.event.before }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_RESOURCE: ${{ inputs.resource }}
           EVENT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ "$EVENT_RESOURCE" == "all" ]]; then
-              resources="all"
-            else
-              resources="$EVENT_RESOURCE"
-            fi
+          if [[ "$EVENT_BEFORE" =~ ^0+$ ]]; then
+            changed_files=$(git diff-tree --no-commit-id --name-only -r "$EVENT_SHA")
           else
-            if [[ "$EVENT_BEFORE" =~ ^0+$ ]]; then
-              changed_files=$(git diff-tree --no-commit-id --name-only -r "$EVENT_SHA")
-            else
-              changed_files=$(git diff --name-only "$EVENT_BEFORE" "$EVENT_SHA")
-            fi
-
-            declare -A changed=()
-            while IFS= read -r path; do
-              case "$path" in
-                .github/workflows/cfm/vpc/*)
-                  changed[vpc]=1
-                  ;;
-                .github/workflows/cfm/ec2.yml)
-                  changed[ec2]=1
-                  ;;
-                .github/workflows/cfm/s3/*)
-                  changed[s3]=1
-                  ;;
-                Dockerfile|src/*|.github/ecs/*)
-                  changed[ecs]=1
-                  ;;
-              esac
-            done <<< "$changed_files"
-
-            resources=""
-            for resource in vpc s3 ec2 ecs; do
-              if [[ -n "${changed[$resource]:-}" ]]; then
-                [[ -z "$resources" ]] || resources+=","
-                resources+="$resource"
-              fi
-            done
+            changed_files=$(git diff --name-only "$EVENT_BEFORE" "$EVENT_SHA")
           fi
+
+          declare -A changed=()
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/cfm/vpc/*)
+                changed[vpc]=1
+                ;;
+              .github/workflows/cfm/ec2.yml)
+                changed[ec2]=1
+                ;;
+              .github/workflows/cfm/s3/*)
+                changed[s3]=1
+                ;;
+              Dockerfile|src/*|.github/ecs/*)
+                changed[ecs]=1
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          resources=""
+          for resource in vpc s3 ec2 ecs; do
+            if [[ -n "${changed[$resource]:-}" ]]; then
+              [[ -z "$resources" ]] || resources+=","
+              resources+="$resource"
+            fi
+          done
 
           echo "resources=$resources" >> "$GITHUB_OUTPUT"
           echo "Changed resources: ${resources:-none}"
 
-      - name: Resolve dependencies and deployment order
+      - name: Resolve prerequisites and deployment order
         id: resolve
         env:
           TARGETS: ${{ steps.detect.outputs.resources }}
@@ -115,33 +91,86 @@ jobs:
           echo "resources=$resources" >> "$GITHUB_OUTPUT"
           echo "Resolved deployment order: ${resources:-none}"
 
-      - name: Set up Java 21 for ECS builds
-        if: ${{ contains(format(',{0},', steps.resolve.outputs.resources), ',ecs,') }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Configure AWS credentials
-        if: ${{ steps.resolve.outputs.resources != '' }}
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
-          aws-region: ap-south-1
-          allowed-account-ids: "798452926315"
-
-      - name: Deploy resolved resources sequentially
+      - name: Dispatch resource workflows sequentially
         if: ${{ steps.resolve.outputs.resources != '' }}
         env:
+          GH_TOKEN: ${{ github.token }}
           RESOURCES: ${{ steps.resolve.outputs.resources }}
-          AWS_REGION: ap-south-1
-          AWS_ACCOUNT_ID: "798452926315"
+          DEPLOY_REF: main
         run: |
           set -euo pipefail
 
           IFS=, read -r -a resources <<< "$RESOURCES"
           for resource in "${resources[@]}"; do
-            echo "::group::Deploy $resource"
-            bash .github/scripts/deploy-resource.sh "$resource"
+            case "$resource" in
+              vpc)
+                workflow="create-vpc.yml"
+                ;;
+              s3)
+                workflow="create-s3.yml"
+                ;;
+              ec2)
+                workflow="deploy-ec2.yml"
+                ;;
+              ecs)
+                workflow="deploy-ecs-hello-world.yml"
+                ;;
+              *)
+                echo "Unknown resource workflow: $resource" >&2
+                exit 1
+                ;;
+            esac
+
+            request_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$resource"
+            run_title="Deploy $resource request $request_id"
+            echo "::group::Dispatch and wait for $resource"
+
+            jq -n --arg ref "$DEPLOY_REF" --arg request_id "$request_id" \
+              '{ref: $ref, inputs: {request_id: $request_id}}' |
+              gh api --method POST \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/dispatches" \
+                --input -
+
+            run_id=""
+            for attempt in $(seq 1 120); do
+              run_id=$(gh api \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?branch=$DEPLOY_REF&event=workflow_dispatch&per_page=100" |
+                jq -r --arg title "$run_title" \
+                  '.workflow_runs[] | select(.display_title == $title) | .id' |
+                head -n 1)
+              if [[ -n "$run_id" ]]; then
+                break
+              fi
+              sleep 5
+            done
+
+            if [[ -z "$run_id" ]]; then
+              echo "Could not find dispatched run '$run_title'" >&2
+              exit 1
+            fi
+
+            completed=false
+            for attempt in $(seq 1 360); do
+              run_state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" |
+                jq -r '[.status, (.conclusion // "")] | @tsv')
+              status=${run_state%%$'\t'*}
+              conclusion=${run_state#*$'\t'}
+
+              if [[ "$status" == "completed" ]]; then
+                completed=true
+                if [[ "$conclusion" != "success" ]]; then
+                  echo "$resource workflow finished with conclusion: $conclusion" >&2
+                  exit 1
+                fi
+                break
+              fi
+              sleep 10
+            done
+
+            if [[ "$completed" != "true" ]]; then
+              echo "Timed out waiting for $resource workflow run $run_id" >&2
+              exit 1
+            fi
+
             echo "::endgroup::"
           done
