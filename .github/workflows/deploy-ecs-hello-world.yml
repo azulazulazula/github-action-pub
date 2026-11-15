@@ -40,9 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/classes
-          javac --release 21 --add-modules jdk.httpserver \
-            -d build/classes \
-            src/main/java/hello/HelloWorldServer.java
+          find src/main/java -name '*.java' -print0 | xargs -0 javac --release 21 --add-modules jdk.httpserver -d build/classes
           jar --create --file build/hello-world.jar \
             --main-class hello.HelloWorldServer \
             -C build/classes .
