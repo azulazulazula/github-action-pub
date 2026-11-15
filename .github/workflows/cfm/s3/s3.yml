@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Private S3 bucket prototype with encryption, versioning, and public access blocked.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Resources:
+  PrototypeBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: isolated private bucket for prototype data; retention avoids accidental data loss
+        must:
+          - Keep all public access blocks enabled
+          - Keep default encryption enabled
+          - Preserve TLS-only access in BucketPolicy
+        mutable: review-required
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: eiei-mun-s3-prototype
+
+  PrototypeBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: prevents insecure HTTP requests to the prototype bucket
+        must:
+          - Deny requests when aws:SecureTransport is false
+    Properties:
+      Bucket: !Ref PrototypeBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt PrototypeBucket.Arn
+              - !Sub "${PrototypeBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+Outputs:
+  BucketName:
+    Description: Name of the private prototype bucket
+    Value: !Ref PrototypeBucket
+
+  BucketArn:
+    Description: ARN of the private prototype bucket
+    Value: !GetAtt PrototypeBucket.Arn
