@@ -26,8 +26,8 @@ resources:
     paths:
       - Dockerfile
       - src/**
-      - .github/ecs/**
       - .github/workflows/cfm/ecs/**
+      - .github/workflows/deploy-ecs-hello-world.yml
     depends_on:
       - vpc
     workflow: .github/workflows/deploy-ecs-hello-world.yml
