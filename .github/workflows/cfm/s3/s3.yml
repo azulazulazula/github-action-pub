@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Private S3 bucket prototype with encryption, versioning, and public access blocked.
+# Test trigger: confirm the completed stack handles a no-op deployment.
 
 Metadata:
   AWSToolsMetrics:
