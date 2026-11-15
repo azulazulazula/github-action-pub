@@ -1,0 +1,142 @@
+name: Deploy changed AWS resources in order
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cfm/vpc/**'
+      - '.github/workflows/cfm/ec2.yml'
+      - '.github/workflows/cfm/s3/**'
+      - 'Dockerfile'
+      - 'src/**'
+      - '.github/ecs/**'
+      - '.github/deploy/resource-order.json'
+      - '.github/scripts/deploy-resource.sh'
+      - '.github/workflows/deploy-aws-resources.yml'
+  workflow_dispatch:
+    inputs:
+      resource:
+        description: Deploy all resources in order, or one selected resource
+        type: choice
+        options:
+          - all
+          - vpc
+          - s3
+          - ec2
+          - ecs
+        default: all
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-aws-resources-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    environment: prod
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed resources
+        id: detect
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_RESOURCE: ${{ inputs.resource }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$EVENT_RESOURCE" == "all" ]]; then
+              resources=$(jq -r 'join(",")' .github/deploy/resource-order.json)
+            else
+              resources="$EVENT_RESOURCE"
+            fi
+          else
+            if [[ "$EVENT_BEFORE" =~ ^0+$ ]]; then
+              changed_files=$(git diff-tree --no-commit-id --name-only -r "$EVENT_SHA")
+            else
+              changed_files=$(git diff --name-only "$EVENT_BEFORE" "$EVENT_SHA")
+            fi
+
+            declare -A changed=()
+            while IFS= read -r path; do
+              case "$path" in
+                .github/workflows/cfm/vpc/*)
+                  changed[vpc]=1
+                  ;;
+                .github/workflows/cfm/ec2.yml)
+                  changed[ec2]=1
+                  ;;
+                .github/workflows/cfm/s3/*)
+                  changed[s3]=1
+                  ;;
+                Dockerfile|src/*|.github/ecs/*)
+                  changed[ecs]=1
+                  ;;
+              esac
+            done <<< "$changed_files"
+
+            resources=$(printf '%s\n' "${!changed[@]}" | sed '/^$/d' | sort | paste -sd, -)
+          fi
+
+          echo "resources=$resources" >> "$GITHUB_OUTPUT"
+          echo "Changed resources: ${resources:-none}"
+
+      - name: Set up Java 21 for ECS builds
+        if: ${{ contains(format(',{0},', steps.detect.outputs.resources), ',ecs,') }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configure AWS credentials
+        if: ${{ steps.detect.outputs.resources != '' }}
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
+          aws-region: ap-south-1
+          allowed-account-ids: "798452926315"
+
+      - name: Deploy selected resources in configured order
+        if: ${{ steps.detect.outputs.resources != '' }}
+        env:
+          TARGETS: ${{ steps.detect.outputs.resources }}
+          AWS_REGION: ap-south-1
+          AWS_ACCOUNT_ID: "798452926315"
+        run: |
+          set -euo pipefail
+
+          jq -e '
+            type == "array"
+            and length > 0
+            and (unique | length) == length
+            and all(.[]; . == "vpc" or . == "s3" or . == "ec2" or . == "ecs")
+          ' .github/deploy/resource-order.json > /dev/null
+
+          IFS=, read -r -a targets <<< "$TARGETS"
+          mapfile -t order < <(jq -r '.[]' .github/deploy/resource-order.json)
+
+          for target in "${targets[@]}"; do
+            if [[ ! " ${order[*]} " =~ " $target " ]]; then
+              echo "Resource '$target' is missing from resource-order.json" >&2
+              exit 1
+            fi
+          done
+
+          for resource in "${order[@]}"; do
+            if [[ ",$TARGETS," == *",$resource,"* ]]; then
+              echo "::group::Deploy $resource"
+              bash .github/scripts/deploy-resource.sh "$resource"
+              echo "::endgroup::"
+            fi
+          done
