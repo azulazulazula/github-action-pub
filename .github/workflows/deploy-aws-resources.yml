@@ -10,7 +10,7 @@ on:
       - 'Dockerfile'
       - 'src/**'
       - '.github/ecs/**'
-      - '.github/deploy/dependencies.yaml'
+      - '.github/deploy/dependency.yml'
       - '.github/scripts/create-deploy-plan.py'
       - '.github/scripts/execute-deploy-plan.py'
       - '.github/scripts/requirements.txt'
