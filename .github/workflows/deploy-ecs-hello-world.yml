@@ -24,8 +24,6 @@ concurrency:
 env:
   AWS_REGION: ap-south-1
   AWS_ACCOUNT_ID: '798452926315'
-  ECS_CLUSTER: eiei-mun-ecs-prototype
-  ECS_SERVICE: eiei-mun-hello-world
   ECR_REPOSITORY: hello-nginx
   ECS_STACK: eiei-mun-ecs-prototype
 
@@ -152,6 +150,17 @@ jobs:
               PublicSubnetId="$PUBLIC_SUBNET_ID" \
             --no-fail-on-empty-changeset
 
+          ECS_CLUSTER=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue | [0]" \
+            --output text)
+          ECS_SERVICE=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceName'].OutputValue | [0]" \
+            --output text)
+          test "$ECS_CLUSTER" != "None"
+          test "$ECS_SERVICE" != "None"
+
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
             --services "$ECS_SERVICE"
@@ -177,7 +186,7 @@ jobs:
             --output text)
           test "$PUBLIC_IP" != "None"
 
-          echo "Hello World URL: http://$PUBLIC_IP:8080" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Hello World URL: http://$PUBLIC_IP" | tee -a "$GITHUB_STEP_SUMMARY"
           aws cloudformation describe-stacks \
             --stack-name "$ECS_STACK" \
             --query 'Stacks[0].Outputs' \
