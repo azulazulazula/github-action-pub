@@ -34,6 +34,7 @@ permissions:
 concurrency:
   group: deploy-aws-resources-main
   cancel-in-progress: false
+  queue: max
 
 jobs:
   deploy:
