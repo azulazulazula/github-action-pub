@@ -1,11 +1,26 @@
 name: Deploy EC2 prototype
+run-name: Deploy ec2 request ${{ inputs.request_id }}
 
 on:
   workflow_call:
+    inputs:
+      request_id:
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Parent orchestration request identifier
+        required: true
+        type: string
 
 permissions:
   contents: read
   id-token: write
+
+concurrency:
+  group: deploy-ec2-prototype
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -22,7 +37,7 @@ jobs:
           aws-region: ap-south-1
           allowed-account-ids: "798452926315"
 
-      - name: Read prototype VPC outputs and find latest AL2023 ARM64 AMI
+      - name: Read VPC outputs and find latest AL2023 ARM64 AMI
         id: discover
         run: |
           set -euo pipefail
@@ -52,7 +67,7 @@ jobs:
           echo "subnet_id=$SUBNET_ID" >> "$GITHUB_OUTPUT"
           echo "ami_id=$AMI_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Validate and deploy CloudFormation stack
+      - name: Validate and deploy EC2 CloudFormation stack
         env:
           VPC_ID: ${{ steps.discover.outputs.vpc_id }}
           SUBNET_ID: ${{ steps.discover.outputs.subnet_id }}
