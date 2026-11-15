@@ -26,7 +26,6 @@ concurrency:
 jobs:
   orchestrate:
     runs-on: ubuntu-22.04
-    environment: prod
     steps:
       - name: Check out repository history
         uses: actions/checkout@v7.0.1
