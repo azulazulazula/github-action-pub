@@ -12,9 +12,17 @@ from pathlib import Path
 
 
 def gh_api(*args: str) -> dict:
-    result = subprocess.run(
-        ["gh", "api", *args], check=True, capture_output=True, text=True
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "api", *args], check=True, capture_output=True, text=True
+        )
+    except subprocess.CalledProcessError as error:
+        details = (error.stderr or error.stdout).strip()
+        command = " ".join(error.cmd)
+        message = f"gh api command failed (exit {error.returncode}): {command}"
+        if details:
+            message += f"\n{details}"
+        raise RuntimeError(message) from error
     return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
@@ -38,6 +46,7 @@ def dispatch_and_wait(step: dict, ref: str, timeout: int) -> int:
     run_id = None
     while time.monotonic() < deadline and run_id is None:
         runs = gh_api(
+            "--method", "GET",
             f"repos/{__import__('os').environ['GITHUB_REPOSITORY']}/actions/workflows/{workflow}/runs",
             "-f", f"branch={ref}",
             "-f", "event=workflow_dispatch",
