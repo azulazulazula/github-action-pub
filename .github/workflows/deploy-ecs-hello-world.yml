@@ -96,11 +96,23 @@ jobs:
           docker push "$IMAGE"
           echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
 
+      - name: Add Docker FROM image tag to task definition
+        run: |
+          set -euo pipefail
+          FROM_IMAGE="$(awk '$1 == "FROM" { image=$NF; sub(/#.*/, "", image); print image; exit }' Dockerfile)"
+          if [[ -z "$FROM_IMAGE" ]]; then
+            echo "No FROM image found in Dockerfile" >&2
+            exit 1
+          fi
+          FROM_NAME="${FROM_IMAGE%:*}"
+          jq --arg value "$FROM_NAME" '.tags = ((.tags // []) + [{"key":"from","value":$value}])' \
+            "$TASK_DEFINITION" > build/task-definition.json
+
       - name: Render task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ env.TASK_DEFINITION }}
+          task-definition: build/task-definition.json
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.image.outputs.uri }}
 
@@ -110,4 +122,5 @@ jobs:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
+          propagate-tags: TASK_DEFINITION
           wait-for-service-stability: true
