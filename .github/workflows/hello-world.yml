@@ -1,11 +1,13 @@
 name: Hello World on main update
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - '.github/**'
+  # Temporarily disabled: avoid an automatic prod approval for this echo-only workflow.
+  # push:
+  #   branches:
+  #     - main
+  #   paths-ignore:
+  #     - '.github/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
