@@ -44,24 +44,24 @@ until pending.empty?
 end
 
 requested = ARGV.fetch(0, "")
-if requested.empty?
-  selected = []
+requested_targets = if requested.empty?
+  []
 elsif requested == "all"
-  selected = graph.keys.dup
+  graph.keys.dup
 else
-  selected = requested.split(",").uniq
-  unknown_targets = selected - graph.keys
-  abort "Unknown requested resources: #{unknown_targets.join(', ')}" unless unknown_targets.empty?
+  requested.split(",").uniq
 end
+unknown_targets = requested_targets - graph.keys
+abort "Unknown requested resources: #{unknown_targets.join(', ')}" unless unknown_targets.empty?
 
 # Deploy prerequisites of every changed/selected target too.
+selected = []
 include_dependencies = lambda do |resource|
   return if selected.include?(resource)
 
   selected << resource
   graph.fetch(resource).each { |dependency| include_dependencies.call(dependency) }
 end
-requested_targets = requested == "all" ? graph.keys.dup : requested.split(",").uniq
 requested_targets.each { |resource| include_dependencies.call(resource) }
 
 puts ordered.select { |resource| selected.include?(resource) }.join(",")
