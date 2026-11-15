@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Public Fargate service running the Hello World application in the prototype VPC.
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: Immutable ECR image URI built by the deployment workflow.
+  BaseImage:
+    Type: String
+    Description: Base image name from the Dockerfile FROM instruction.
+  SourceRevision:
+    Type: String
+    Description: Git commit deployed to this service.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+Resources:
+  HelloWorldLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/eiei-mun-hello-world
+      RetentionInDays: 7
+
+  HelloWorldSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow browser access to the Hello World container
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: HTTP access to the Hello World application
+          IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: eiei-mun-ecs-prototype
+
+  HelloWorldCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: eiei-mun-ecs-prototype
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: eiei-mun-ecs-prototype
+
+  HelloWorldTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: HelloWorldLogGroup
+    Properties:
+      Family: eiei-mun-hello-world
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: arn:aws:iam::798452926315:role/ecsTaskExecutionRole
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: hello-world
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - Name: http
+              ContainerPort: 8080
+              Protocol: tcp
+              AppProtocol: http
+          HealthCheck:
+            Command:
+              - CMD
+              - java
+              - -cp
+              - /app/hello-world.jar
+              - hello.HealthCheck
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 20
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref HelloWorldLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: hello-world
+      Tags:
+        - Key: Name
+          Value: eiei-mun-hello-world
+        - Key: base-image
+          Value: !Ref BaseImage
+        - Key: source-revision
+          Value: !Ref SourceRevision
+
+  HelloWorldService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HelloWorldCluster
+      - HelloWorldSecurityGroup
+    Properties:
+      ServiceName: eiei-mun-hello-world
+      Cluster: !Ref HelloWorldCluster
+      TaskDefinition: !Ref HelloWorldTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnetId
+          SecurityGroups:
+            - !Ref HelloWorldSecurityGroup
+      Tags:
+        - Key: Name
+          Value: eiei-mun-hello-world
+
+Outputs:
+  ClusterName:
+    Description: ECS cluster name
+    Value: !Ref HelloWorldCluster
+  ServiceName:
+    Description: ECS service name
+    Value: !GetAtt HelloWorldService.Name
+  TaskDefinitionArn:
+    Description: Registered task definition revision
+    Value: !Ref HelloWorldTaskDefinition
+  SecurityGroupId:
+    Description: Security group allowing browser access on port 8080
+    Value: !Ref HelloWorldSecurityGroup
