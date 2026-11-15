@@ -86,7 +86,13 @@ jobs:
               esac
             done <<< "$changed_files"
 
-            resources=$(printf '%s\n' "${!changed[@]}" | sed '/^$/d' | sort | paste -sd, -)
+            resources=""
+            for resource in vpc s3 ec2 ecs; do
+              if [[ -n "${changed[$resource]:-}" ]]; then
+                [[ -z "$resources" ]] || resources+=","
+                resources+="$resource"
+              fi
+            done
           fi
 
           echo "resources=$resources" >> "$GITHUB_OUTPUT"
@@ -127,7 +133,8 @@ jobs:
           mapfile -t order < <(jq -r '.[]' .github/deploy/resource-order.json)
 
           for target in "${targets[@]}"; do
-            if [[ ! " ${order[*]} " =~ " $target " ]]; then
+            if ! jq -e --arg target "$target" 'index($target) != null' \
+              .github/deploy/resource-order.json > /dev/null; then
               echo "Resource '$target' is missing from resource-order.json" >&2
               exit 1
             fi
