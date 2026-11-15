@@ -1,4 +1,4 @@
-name: Deploy changed AWS resources in order
+name: Deploy changed AWS resources by dependency
 
 on:
   push:
@@ -10,13 +10,14 @@ on:
       - 'Dockerfile'
       - 'src/**'
       - '.github/ecs/**'
-      - '.github/deploy/resource-order.json'
+      - '.github/deploy/dependencies.yaml'
+      - '.github/scripts/resolve-dependencies.rb'
       - '.github/scripts/deploy-resource.sh'
       - '.github/workflows/deploy-aws-resources.yml'
   workflow_dispatch:
     inputs:
       resource:
-        description: Deploy all resources in order, or one selected resource
+        description: Deploy all resources or one selected resource
         type: choice
         options:
           - all
@@ -46,6 +47,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Ruby for dependency YAML
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
       - name: Detect changed resources
         id: detect
         env:
@@ -58,7 +64,7 @@ jobs:
 
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             if [[ "$EVENT_RESOURCE" == "all" ]]; then
-              resources=$(jq -r 'join(",")' .github/deploy/resource-order.json)
+              resources="all"
             else
               resources="$EVENT_RESOURCE"
             fi
@@ -99,52 +105,43 @@ jobs:
           echo "resources=$resources" >> "$GITHUB_OUTPUT"
           echo "Changed resources: ${resources:-none}"
 
+      - name: Resolve dependencies and deployment order
+        id: resolve
+        env:
+          TARGETS: ${{ steps.detect.outputs.resources }}
+        run: |
+          set -euo pipefail
+          resources=$(ruby .github/scripts/resolve-dependencies.rb "$TARGETS")
+          echo "resources=$resources" >> "$GITHUB_OUTPUT"
+          echo "Resolved deployment order: ${resources:-none}"
+
       - name: Set up Java 21 for ECS builds
-        if: ${{ contains(format(',{0},', steps.detect.outputs.resources), ',ecs,') }}
+        if: ${{ contains(format(',{0},', steps.resolve.outputs.resources), ',ecs,') }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Configure AWS credentials
-        if: ${{ steps.detect.outputs.resources != '' }}
+        if: ${{ steps.resolve.outputs.resources != '' }}
         uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
           role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
           aws-region: ap-south-1
           allowed-account-ids: "798452926315"
 
-      - name: Deploy selected resources in configured order
-        if: ${{ steps.detect.outputs.resources != '' }}
+      - name: Deploy resolved resources sequentially
+        if: ${{ steps.resolve.outputs.resources != '' }}
         env:
-          TARGETS: ${{ steps.detect.outputs.resources }}
+          RESOURCES: ${{ steps.resolve.outputs.resources }}
           AWS_REGION: ap-south-1
           AWS_ACCOUNT_ID: "798452926315"
         run: |
           set -euo pipefail
 
-          jq -e '
-            type == "array"
-            and length > 0
-            and (unique | length) == length
-            and all(.[]; . == "vpc" or . == "s3" or . == "ec2" or . == "ecs")
-          ' .github/deploy/resource-order.json > /dev/null
-
-          IFS=, read -r -a targets <<< "$TARGETS"
-          mapfile -t order < <(jq -r '.[]' .github/deploy/resource-order.json)
-
-          for target in "${targets[@]}"; do
-            if ! jq -e --arg target "$target" 'index($target) != null' \
-              .github/deploy/resource-order.json > /dev/null; then
-              echo "Resource '$target' is missing from resource-order.json" >&2
-              exit 1
-            fi
-          done
-
-          for resource in "${order[@]}"; do
-            if [[ ",$TARGETS," == *",$resource,"* ]]; then
-              echo "::group::Deploy $resource"
-              bash .github/scripts/deploy-resource.sh "$resource"
-              echo "::endgroup::"
-            fi
+          IFS=, read -r -a resources <<< "$RESOURCES"
+          for resource in "${resources[@]}"; do
+            echo "::group::Deploy $resource"
+            bash .github/scripts/deploy-resource.sh "$resource"
+            echo "::endgroup::"
           done
