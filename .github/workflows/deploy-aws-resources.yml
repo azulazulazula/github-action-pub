@@ -1,4 +1,4 @@
-name: Deploy changed AWS resources by dependency
+name: Orchestrate AWS resource deployments
 
 on:
   push:
@@ -10,27 +10,15 @@ on:
       - 'Dockerfile'
       - 'src/**'
       - '.github/ecs/**'
-      - '.github/deploy/dependencies.yaml'
-      - '.github/scripts/resolve-dependencies.rb'
-      - '.github/scripts/deploy-resource.sh'
+      - '.github/deploy/dependency.yml'
+      - '.github/scripts/create-deploy-plan.py'
+      - '.github/scripts/execute-deploy-plan.py'
+      - '.github/scripts/requirements.txt'
       - '.github/workflows/deploy-aws-resources.yml'
-  workflow_dispatch:
-    inputs:
-      resource:
-        description: Deploy all resources or one selected resource
-        type: choice
-        options:
-          - all
-          - vpc
-          - s3
-          - ec2
-          - ecs
-        default: all
-        required: true
 
 permissions:
   contents: read
-  id-token: write
+  actions: write
 
 concurrency:
   group: deploy-aws-resources-main
@@ -38,110 +26,49 @@ concurrency:
   queue: max
 
 jobs:
-  deploy:
+  orchestrate:
     runs-on: ubuntu-22.04
-    environment: prod
     steps:
       - name: Check out repository history
         uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Set up Ruby for dependency YAML
-        uses: ruby/setup-ruby@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          ruby-version: '3.2'
+          python-version: '3.12'
 
-      - name: Detect changed resources
-        id: detect
+      - name: Install deployment-plan dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
+
+      - name: Create deployment plan
         env:
           EVENT_BEFORE: ${{ github.event.before }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_RESOURCE: ${{ inputs.resource }}
           EVENT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          set -euo pipefail
+          python .github/scripts/create-deploy-plan.py \
+            --before "$EVENT_BEFORE" \
+            --after "$EVENT_SHA" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/deploy-plan.json"
 
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ "$EVENT_RESOURCE" == "all" ]]; then
-              resources="all"
-            else
-              resources="$EVENT_RESOURCE"
-            fi
-          else
-            if [[ "$EVENT_BEFORE" =~ ^0+$ ]]; then
-              changed_files=$(git diff-tree --no-commit-id --name-only -r "$EVENT_SHA")
-            else
-              changed_files=$(git diff --name-only "$EVENT_BEFORE" "$EVENT_SHA")
-            fi
-
-            declare -A changed=()
-            while IFS= read -r path; do
-              case "$path" in
-                .github/workflows/cfm/vpc/*)
-                  changed[vpc]=1
-                  ;;
-                .github/workflows/cfm/ec2.yml)
-                  changed[ec2]=1
-                  ;;
-                .github/workflows/cfm/s3/*)
-                  changed[s3]=1
-                  ;;
-                Dockerfile|src/*|.github/ecs/*)
-                  changed[ecs]=1
-                  ;;
-              esac
-            done <<< "$changed_files"
-
-            resources=""
-            for resource in vpc s3 ec2 ecs; do
-              if [[ -n "${changed[$resource]:-}" ]]; then
-                [[ -z "$resources" ]] || resources+=","
-                resources+="$resource"
-              fi
-            done
-          fi
-
-          echo "resources=$resources" >> "$GITHUB_OUTPUT"
-          echo "Changed resources: ${resources:-none}"
-
-      - name: Resolve dependencies and deployment order
-        id: resolve
+      - name: Execute deployment plan
         env:
-          TARGETS: ${{ steps.detect.outputs.resources }}
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_REF: main
         run: |
-          set -euo pipefail
-          resources=$(ruby .github/scripts/resolve-dependencies.rb "$TARGETS")
-          echo "resources=$resources" >> "$GITHUB_OUTPUT"
-          echo "Resolved deployment order: ${resources:-none}"
+          python .github/scripts/execute-deploy-plan.py \
+            --plan "$RUNNER_TEMP/deploy-plan.json" \
+            --ref "$DEPLOY_REF"
 
-      - name: Set up Java 21 for ECS builds
-        if: ${{ contains(format(',{0},', steps.resolve.outputs.resources), ',ecs,') }}
-        uses: actions/setup-java@v4
+      - name: Upload deployment plan
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Configure AWS credentials
-        if: ${{ steps.resolve.outputs.resources != '' }}
-        uses: aws-actions/configure-aws-credentials@v6.3.0
-        with:
-          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
-          aws-region: ap-south-1
-          allowed-account-ids: "798452926315"
-
-      - name: Deploy resolved resources sequentially
-        if: ${{ steps.resolve.outputs.resources != '' }}
-        env:
-          RESOURCES: ${{ steps.resolve.outputs.resources }}
-          AWS_REGION: ap-south-1
-          AWS_ACCOUNT_ID: "798452926315"
-        run: |
-          set -euo pipefail
-
-          IFS=, read -r -a resources <<< "$RESOURCES"
-          for resource in "${resources[@]}"; do
-            echo "::group::Deploy $resource"
-            bash .github/scripts/deploy-resource.sh "$resource"
-            echo "::endgroup::"
-          done
+          name: deploy-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/deploy-plan.json
+          if-no-files-found: ignore
