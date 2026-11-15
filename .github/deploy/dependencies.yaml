@@ -1,0 +1,8 @@
+# Dependencies among the resources deployed by deploy-aws-resources.yml.
+# ECS's ECR repository, cluster, service, and execution role are managed separately.
+dependencies:
+  vpc: []
+  s3: []
+  ec2:
+    - vpc
+  ecs: []
