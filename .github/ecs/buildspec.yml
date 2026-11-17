@@ -1,0 +1,20 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto21
+  pre_build:
+    commands:
+      - set -euo pipefail
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${IMAGE_REPO_URI%%/*}"
+  build:
+    commands:
+      - mkdir -p build/classes
+      - find src/main/java -name '*.java' -print0 | xargs -0 javac --release 21 --add-modules jdk.httpserver -d build/classes
+      - jar --create --file build/hello-world.jar --main-class hello.HelloWorldServer -C build/classes .
+      - docker build --file Dockerfile --tag "$IMAGE_REPO_URI:$IMAGE_TAG" .
+      - docker push "$IMAGE_REPO_URI:$IMAGE_TAG"
