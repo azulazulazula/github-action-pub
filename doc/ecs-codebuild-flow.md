@@ -55,6 +55,21 @@ CloudFormationで作成されるCodeConnectionsは初期状態が PENDING とな
 
 AWSコンソールでGitHub Appを接続し、対象リポジトリだけにアクセスを許可した後、親ワークフローを再実行する。接続が AVAILABLE になればCodeBuildが続行する。
 
+## PRマージ後の実行手順
+
+現在、CodeBuildスタックとECSスタックはまだAWSに作成されていない。IAMポリシー `DeployEcsCodeBuild` は `ra-men-role` に適用済み。次の順で環境を作成する。
+
+1. PR #24をマージする。マージできない場合は、先にGitHubが示す競合を解消する。
+2. `main` への更新で親ワークフローが起動したことをActionsで確認する。GitHubの `prod` 環境承認が表示されたら承認する。
+3. 親ワークフローは依存順にVPCを確認したあと、`deploy-ecs-codebuild.yml` を実行する。ここでCloudFormationスタック `eiei-mun-ecs-codebuild` が作成され、GitHub接続・CodeBuildプロジェクト・専用ロール・ロググループが用意される。
+4. 初回は接続が `PENDING` のため、接続確認ステップでワークフローが停止する。これは想定された停止で、ECSスタックはまだ作成されない。Actionsのステップサマリーに表示されるConnectionsリンクを開く。
+5. AWSコンソールのDeveloper Tools > Settings > Connectionsで対象接続を開き、GitHub Appを承認する。許可対象は `azulazulazula/github-action-pub` のみにする。接続状態が `AVAILABLE` になったことを確認する。
+6. GitHub Actionsから失敗した親ワークフローを再実行する。CodeBuildが対象コミットを取得し、JARとコンテナイメージを作成してECRへpushする。
+7. ビルド成功後、CloudFormationスタック `eiei-mun-ecs-prototype` が作成または更新され、ECSサービスが安定するまで待つ。
+8. 完了したActions実行のサマリーで `Hello World URL` を開き、応答を確認する。
+
+初回実行は接続承認で止まるため、そのまま再実行せず、先にAWSコンソールで承認を完了する。2回目以降は接続が `AVAILABLE` のままなので、通常はビルドからECSデプロイまで進む。
+
 ## IAM権限と適用手順
 
 ### 適用状態
