@@ -86,17 +86,17 @@ CodeBuild方式の初回実行手順や公開範囲・費用・後片付けの�
 
 ```mermaid
 flowchart LR
-    A[Pull Request] --> B[GitHub Actions CI]
-    B --> B1[テスト・Javaビルド]
-    B1 --> B2[Docker build]
-    B2 --> B3[ECRへpush<br/>commit SHA / digest]
-    B3 --> C[mainへマージ]
-    C --> D[GitHub Actionsのprod承認]
-    D --> E[ActionsがCodeBuildを開始<br/>image URIとcommit SHAを渡す]
-    E --> F[CodeBuildが同じSHAのデプロイ定義を取得]
-    F --> G[CodeBuildがCloudFormationでECSを更新<br/>Docker buildはしない]
-    G --> H[ECSサービス安定化]
-    H --> I[Actionsが結果とURLを表示]
+    A[Pull Request] --> B[GitHub ActionsのPRチェック]
+    B --> C[mainへマージ]
+    C --> D[GitHub ActionsのCI]
+    D --> D1[Java/JARとDocker imageを一度だけビルド]
+    D1 --> D2[ECRへpush<br/>commit SHA / digest]
+    D2 --> E[GitHub Actionsのprod承認]
+    E --> F[ActionsがCodeBuildを開始<br/>同じimage URIとcommit SHAを渡す]
+    F --> G[CodeBuildが同じSHAのデプロイ定義を取得]
+    G --> H[CodeBuildがCloudFormationでECSを更新<br/>Docker buildはしない]
+    H --> I[ECSサービス安定化]
+    I --> J[Actionsが結果とURLを表示]
 ```
 
 ### 役割分担
