@@ -79,3 +79,44 @@ flowchart LR
 `deploy-ecs-hello-world.yml` はGitHub Actions内でビルドする比較用の別ワークフローとして残っている。通常の親ワークフローから自動選択される方式ではない。
 
 CodeBuild方式の初回実行手順や公開範囲・費用・後片付けの注意点は、[ECS CodeBuild処理フロー](ecs-codebuild-flow.md)を参照。
+
+## 別ケースの例: 静的サイトのビルドと公開
+
+ReactやVueなどの静的サイトを、CodeBuildでビルドし、GitHub Actionsで承認と公開を制御する構成も考えられる。ビルド成果物はコミットSHAごとのZIPとして成果物用S3バケットへ保存し、Actionsがその同じ成果物を取得して公開用S3へ配置し、CloudFrontのキャッシュを無効化する。
+
+```mermaid
+flowchart LR
+    A[Pull Request] --> B[Actionsでlint・テスト]
+    B --> C[mainへマージ]
+    C --> D[Actionsのprod承認]
+    D --> E[Actionsが対象SHAでCodeBuildを開始]
+    E --> F[CodeBuildがnpm ci・サイトビルド]
+    F --> G[成果物ZIPを成果物用S3へ保存<br/>commit SHA]
+    G --> H[Actionsが同じZIPを取得]
+    H --> I[公開用S3へ配置]
+    I --> J[CloudFrontキャッシュを無効化]
+```
+
+### 役割分担
+
+- **GitHub Actions**: Pull Requestのlint・テスト、mainへのマージ後の承認ゲート、CodeBuildの起動と結果確認、成果物の公開、CloudFrontキャッシュ無効化を担当する。
+- **CodeBuild**: 指定されたコミットのソースを取得し、依存パッケージをインストールして静的ファイルを生成する。出力はコミットSHA付きでS3へ保存する。
+- **成果物用S3**: ビルド結果を一時的に受け渡す。公開用S3とは分けて、保存期間を決める。
+- **公開用S3/CloudFront**: ビルド済みの静的サイトを利用者へ配信する。
+
+### GitHub Actions上でビルドする場合に必要なこと・懸念
+
+- Node.jsのバージョン、npm/pnpm/yarnのバージョン、OS依存パッケージをrunner上でそろえる。ロックファイルに基づくインストールとキャッシュ設定も必要になる。
+- ビルドを別jobに分けるなら、生成した `dist/` をActions artifactにアップロードし、公開jobでダウンロードする。両jobが同じコミットの成果物を扱うこと、artifactの保持期間・サイズを決める必要がある。
+- Actions側でAWS OIDC認証を行い、公開用S3への書き込みとCloudFront invalidationだけを許可するIAM権限を用意する。長期アクセスキーをSecretsに置かない。
+- private npm registryや社内依存パッケージを使う場合、runnerから接続できる経路と認証情報が必要。GitHub-hosted runnerから社内ネットワークへ到達できない構成では、self-hosted runnerや公開可能なパッケージミラーなどを用意する。
+- 大きなビルドやネイティブモジュールでrunnerのメモリ・ディスク・実行時間が足りるか確認する。必要なrunnerサイズやキャッシュを維持する担当も決める。
+
+### CodeBuildを使う場合に増える考慮点
+
+- CodeBuildのビルド環境、buildspec、GitHub接続、サービスロールを管理する。サービスロールはソース取得と成果物用S3への書き込みだけに絞る。
+- CodeBuildとActionsの間で成果物を受け渡すため、成果物S3の読み書き権限、暗号化キー、保存期間、削除ルールを決める。
+- Actionsのテスト結果とCodeBuildの本番ビルドが異なる成果物にならないよう、両方の処理で同じコミットSHAを固定する。テスト済み成果物をそのまま公開する設計が望ましい。
+- CodeBuildをVPCに接続してprivate registryへアクセスさせる場合、npm registryなどへの外向き通信も別途確保する。private subnetならNATや適切なVPC endpoint/プロキシが必要か確認する。
+- `prod` の承認はCodeBuild起動前に置く。承認前にビルドを始める設計だと、承認されない変更にもビルド時間と料金が発生する。
+
