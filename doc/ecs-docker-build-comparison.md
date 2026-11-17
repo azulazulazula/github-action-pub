@@ -118,3 +118,5 @@ CodeBuildではbuildspecからAWS CLIなどのコマンドを実行でき、Acti
 - **失敗時の確認先**: ビルド失敗はActionsのjobログ、CD失敗はCodeBuild/CloudWatch LogsとCloudFormation/ECSイベントで調査する。CD後にActionsがURLを表示するなら、CodeBuildから完了状態・デプロイ結果をActionsへ返す方法も設計する。
 
 この分担は技術的に可能だが、単純なECSデプロイではGitHub ActionsからCloudFormationを直接実行する方が設定要素は少ない。CodeBuildにCDを任せる利点は、デプロイ権限を専用サービスロールへ分離したい場合や、デプロイ処理をAWS側に集約したい場合に大きくなる。ここに記載したCI/CD分担は比較案であり、現在のワークフローはこの構成には変更していない。
+
+詳しい役割分担の3案（CBビルド・push後にActionsがECSデプロイする案、Actionsビルド後にCBがECSデプロイする案、Actionsから成果物を渡してCBがビルド・push・デプロイする案）は、[ECS CI/CD役割分担の3案](ecs-cicd-role-options.md)を参照。
