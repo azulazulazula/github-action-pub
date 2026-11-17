@@ -69,7 +69,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - codeconnections:UseConnection
-                Resource: !GetAtt GitHubConnection.ConnectionArn
+                Resource: !Ref GitHubConnection
                 Condition:
                   StringEquals:
                     codeconnections:FullRepositoryId: azulazulazula/github-action-pub
@@ -94,7 +94,7 @@ Resources:
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub "${CodeBuildLogGroup.Arn}:*"
+                Resource: !GetAtt CodeBuildLogGroup.Arn
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-service-role"
@@ -123,7 +123,7 @@ Resources:
         BuildSpec: .github/ecs/buildspec.yml
         Auth:
           Type: CODECONNECTIONS
-          Resource: !GetAtt GitHubConnection.ConnectionArn
+          Resource: !Ref GitHubConnection
       SourceVersion: main
       Artifacts:
         Type: NO_ARTIFACTS
@@ -157,4 +157,4 @@ Outputs:
     Value: !Ref EcsImageBuildProject
   GitHubConnectionArn:
     Description: GitHub connection that must have AVAILABLE status before builds can start.
-    Value: !GetAtt GitHubConnection.ConnectionArn
+    Value: !Ref GitHubConnection
