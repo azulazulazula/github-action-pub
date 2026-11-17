@@ -210,7 +210,9 @@
         "logs:PutLogEvents"
       ],
       "Resource": [
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/aws/codebuild/eiei-mun-ecs-codebuild",
         "arn:aws:logs:ap-south-1:798452926315:log-group:/aws/codebuild/eiei-mun-ecs-codebuild:*",
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-prototype",
         "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-prototype:*"
       ]
     },
