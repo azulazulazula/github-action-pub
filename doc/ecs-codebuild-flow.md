@@ -55,11 +55,31 @@ CloudFormationで作成されるCodeConnectionsは初期状態が PENDING とな
 
 AWSコンソールでGitHub Appを接続し、対象リポジトリだけにアクセスを許可した後、親ワークフローを再実行する。接続が AVAILABLE になればCodeBuildが続行する。
 
-## IAM権限
+## IAM権限と適用手順
 
-- GitHub Actions用の既存ロール: CodeBuildスタック/ECSスタックのCloudFormation操作、対象CodeBuildプロジェクトの起動・状態確認、ECSサービス安定化確認に必要な権限。
-- CodeBuildサービスロール: CodeConnectionsから対象GitHubリポジトリを読み取り、指定ECRリポジトリへpushし、指定CloudWatch Logsへ書き込む権限。
-- タスク実行ロール: 既存のECSタスク実行ロールを使う。CodeBuild用ロールとは分離する。
+### 適用状態
+
+GitHub ActionsのOIDCロール `ra-men-role` に、インラインポリシー `DeployEcsCodeBuild` を適用済み。ポリシー全文は [.github/iam/policies/deploy-ecs-codebuild.json](../.github/iam/policies/deploy-ecs-codebuild.json) に保存する。
+
+### 実行手順
+
+1. AWS IAMでロール `ra-men-role` を開き、信頼ポリシーがGitHub ActionsのOIDCを許可していることを確認する。
+2. IAMロールの「許可」からインラインポリシー `DeployEcsCodeBuild` を追加する。JSONエディタに上記ファイルの全文を貼り付けて保存する。
+3. 新しいワークフローを実行し、CloudFormationがCodeBuildプロジェクト、GitHub接続、専用サービスロールを作成することを確認する。
+4. 初回はAWSコンソールのDeveloper Tools > Settings > ConnectionsでGitHub接続を承認し、対象リポジトリだけにアクセスを許可する。
+5. 親ワークフローを再実行する。接続が `AVAILABLE` なら、ビルド後にECSがデプロイされる。
+
+### `DeployEcsCodeBuild` が許可する操作
+
+- **CloudFormation**: 指定したCodeBuild/ECSスタックとそのChange Setの確認・実行・削除。テンプレート検証とテンプレート概要の取得は `Resource: *`。
+- **CodeBuild**: `eiei-mun-ecs-codebuild-project` の作成・更新・削除、ビルド開始・状態確認・停止。
+- **CodeConnections**: GitHub接続作成はARNが作成前に決まらないため `Resource: *`。既存接続の確認・削除・タグ操作は同じAWSアカウント/リージョンの接続ARNに限定。
+- **IAM**: `eiei-mun-ecs-codebuild-service-role` の作成・削除・信頼/インラインポリシー管理とCodeBuildへのPassRole。既存 `ecsTaskExecutionRole` はECSタスクへのPassRoleのみ。
+- **ECS**: 指定したプロトタイプクラスター、タスク定義、サービスの作成・更新・削除と状態確認。タスク一覧・詳細取得は `Resource: *`。
+- **EC2ネットワーク**: VPC/セキュリティグループ/ネットワークインターフェースの参照は `Resource: *`。セキュリティグループ作成はap-south-1かつNameタグが `eiei-mun-ecs-prototype*` の要求に限定し、変更/削除は同じNameタグのグループに限定。
+- **CloudWatch Logs**: 指定されたCodeBuild/ECSロググループの作成・削除・保持期間・書き込み操作。ロググループ一覧の参照は `Resource: *`。
+
+GitHub Actions用ロールとCodeBuildサービスロールは別の役割を持つ。前者はデプロイ操作を行い、後者はソース取得、ECR push、ビルドログ書き込みを行う。
 
 ## 現在の扱い
 
