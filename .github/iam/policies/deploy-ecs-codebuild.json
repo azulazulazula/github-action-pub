@@ -1,0 +1,224 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageOnlyEcsPrototypeStacks",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateChangeSet",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:ListStackResources",
+        "cloudformation:GetTemplate"
+      ],
+      "Resource": [
+        "arn:aws:cloudformation:ap-south-1:798452926315:stack/eiei-mun-ecs-codebuild/*",
+        "arn:aws:cloudformation:ap-south-1:798452926315:stack/eiei-mun-ecs-prototype/*",
+        "arn:aws:cloudformation:ap-south-1:798452926315:changeSet/eiei-mun-ecs-codebuild/*",
+        "arn:aws:cloudformation:ap-south-1:798452926315:changeSet/eiei-mun-ecs-prototype/*"
+      ]
+    },
+    {
+      "Sid": "ValidateCloudFormationTemplates",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:ValidateTemplate",
+        "cloudformation:GetTemplateSummary"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageCodeBuildProject",
+      "Effect": "Allow",
+      "Action": [
+        "codebuild:CreateProject",
+        "codebuild:UpdateProject",
+        "codebuild:DeleteProject",
+        "codebuild:BatchGetProjects",
+        "codebuild:StartBuild",
+        "codebuild:BatchGetBuilds",
+        "codebuild:StopBuild"
+      ],
+      "Resource": [
+        "arn:aws:codebuild:ap-south-1:798452926315:project/eiei-mun-ecs-codebuild-project",
+        "arn:aws:codebuild:ap-south-1:798452926315:build/eiei-mun-ecs-codebuild-project:*"
+      ]
+    },
+    {
+      "Sid": "CreateGitHubConnection",
+      "Effect": "Allow",
+      "Action": "codeconnections:CreateConnection",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManagePrototypeGitHubConnection",
+      "Effect": "Allow",
+      "Action": [
+        "codeconnections:GetConnection",
+        "codeconnections:DeleteConnection",
+        "codeconnections:TagResource",
+        "codeconnections:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:codeconnections:ap-south-1:798452926315:connection/*",
+        "arn:aws:codestar-connections:ap-south-1:798452926315:connection/*"
+      ]
+    },
+    {
+      "Sid": "ManageCodeBuildServiceRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole"
+      ],
+      "Resource": "arn:aws:iam::798452926315:role/eiei-mun-ecs-codebuild-service-role"
+    },
+    {
+      "Sid": "PassCodeBuildServiceRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::798452926315:role/eiei-mun-ecs-codebuild-service-role",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "codebuild.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "PassEcsTaskExecutionRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::798452926315:role/ecsTaskExecutionRole",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "ManageEcsPrototypeCluster",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateCluster",
+        "ecs:DeleteCluster",
+        "ecs:DescribeClusters",
+        "ecs:TagResource",
+        "ecs:UntagResource"
+      ],
+      "Resource": "arn:aws:ecs:ap-south-1:798452926315:cluster/eiei-mun-ecs-prototype-cluster"
+    },
+    {
+      "Sid": "ManageEcsPrototypeTaskDefinition",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RegisterTaskDefinition",
+        "ecs:DeregisterTaskDefinition",
+        "ecs:DescribeTaskDefinition",
+        "ecs:TagResource",
+        "ecs:UntagResource"
+      ],
+      "Resource": "arn:aws:ecs:ap-south-1:798452926315:task-definition/eiei-mun-ecs-prototype-task:*"
+    },
+    {
+      "Sid": "ManageEcsPrototypeService",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateService",
+        "ecs:UpdateService",
+        "ecs:DeleteService",
+        "ecs:DescribeServices",
+        "ecs:TagResource",
+        "ecs:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:ecs:ap-south-1:798452926315:service/eiei-mun-ecs-prototype-cluster/eiei-mun-ecs-prototype-service",
+        "arn:aws:ecs:ap-south-1:798452926315:cluster/eiei-mun-ecs-prototype-cluster"
+      ]
+    },
+    {
+      "Sid": "ReadEcsTaskAttachments",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListTasks",
+        "ecs:DescribeTasks"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageEcsPrototypeSecurityGroup",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:DeleteSecurityGroup",
+        "ec2:CreateTags",
+        "ec2:DeleteTags"
+      ],
+      "Resource": "arn:aws:ec2:ap-south-1:798452926315:security-group/*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/Name": "eiei-mun-ecs-prototype*"
+        }
+      }
+    },
+    {
+      "Sid": "CreateEcsPrototypeSecurityGroup",
+      "Effect": "Allow",
+      "Action": "ec2:CreateSecurityGroup",
+      "Resource": "arn:aws:ec2:ap-south-1:798452926315:vpc/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-south-1"
+        },
+        "StringLike": {
+          "aws:RequestTag/Name": "eiei-mun-ecs-prototype*"
+        }
+      }
+    },
+    {
+      "Sid": "DescribeEcsPrototypeNetwork",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeNetworkInterfaces"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageEcsPrototypeLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/aws/codebuild/eiei-mun-ecs-codebuild:*",
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-prototype:*"
+      ]
+    },
+    {
+      "Sid": "DescribePrototypeLogGroups",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
+    }
+  ]
+}
