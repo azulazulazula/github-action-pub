@@ -80,43 +80,41 @@ flowchart LR
 
 CodeBuild方式の初回実行手順や公開範囲・費用・後片付けの注意点は、[ECS CodeBuild処理フロー](ecs-codebuild-flow.md)を参照。
 
-## 別ケースの例: 静的サイトのビルドと公開
+## 別の役割分担例: GitHub ActionsでCI、CodeBuildでCD
 
-ReactやVueなどの静的サイトを、CodeBuildでビルドし、GitHub Actionsで承認と公開を制御する構成も考えられる。ビルド成果物はコミットSHAごとのZIPとして成果物用S3バケットへ保存し、Actionsがその同じ成果物を取得して公開用S3へ配置し、CloudFrontのキャッシュを無効化する。
+今回のCodeBuild方式ではCodeBuildがDockerイメージをビルドし、GitHub ActionsがECSへデプロイする。別案として、**同じアプリケーションのDockerイメージをGitHub Actionsで一度だけビルドし、CodeBuildはその完成済みイメージをECSへデプロイする処理だけを担当する**構成もできる。ビルド対象は変えず、CIとCDの実行場所を分ける案である。
 
 ```mermaid
 flowchart LR
-    A[Pull Request] --> B[Actionsでlint・テスト]
-    B --> C[mainへマージ]
-    C --> D[Actionsのprod承認]
-    D --> E[Actionsが対象SHAでCodeBuildを開始]
-    E --> F[CodeBuildがnpm ci・サイトビルド]
-    F --> G[成果物ZIPを成果物用S3へ保存<br/>commit SHA]
-    G --> H[Actionsが同じZIPを取得]
-    H --> I[公開用S3へ配置]
-    I --> J[CloudFrontキャッシュを無効化]
+    A[Pull Request] --> B[GitHub Actions CI]
+    B --> B1[テスト・Javaビルド]
+    B1 --> B2[Docker build]
+    B2 --> B3[ECRへpush<br/>commit SHA / digest]
+    B3 --> C[mainへマージ]
+    C --> D[GitHub Actionsのprod承認]
+    D --> E[ActionsがCodeBuildを開始<br/>image URIとcommit SHAを渡す]
+    E --> F[CodeBuildが同じSHAのデプロイ定義を取得]
+    F --> G[CodeBuildがCloudFormationでECSを更新<br/>Docker buildはしない]
+    G --> H[ECSサービス安定化]
+    H --> I[Actionsが結果とURLを表示]
 ```
 
 ### 役割分担
 
-- **GitHub Actions**: Pull Requestのlint・テスト、mainへのマージ後の承認ゲート、CodeBuildの起動と結果確認、成果物の公開、CloudFrontキャッシュ無効化を担当する。
-- **CodeBuild**: 指定されたコミットのソースを取得し、依存パッケージをインストールして静的ファイルを生成する。出力はコミットSHA付きでS3へ保存する。
-- **成果物用S3**: ビルド結果を一時的に受け渡す。公開用S3とは分けて、保存期間を決める。
-- **公開用S3/CloudFront**: ビルド済みの静的サイトを利用者へ配信する。
+- **GitHub Actions (CIとオーケストレーション)**: Pull Requestでテストを実行し、承認済みの変更をmainへマージする。デプロイ時はJava/JARとDockerイメージを一度だけビルドしてECRへpushし、`IMAGE_URI` またはECRのdigestとコミットSHAをCodeBuildへ渡す。GitHubの `prod` 承認、CodeBuild起動、終了待ちも担当する。
+- **CodeBuild (CDの実行環境)**: 指定されたコミットのデプロイ定義を取得し、渡されたECRイメージを参照してCloudFormationでECSサービスを更新する。CodeBuildのbuildspecにはデプロイ処理だけを置き、JavaやDockerのビルドは行わない。
+- **ECR**: CIで作ったイメージとCDの間の受け渡し地点。同一コミットの完成イメージをそのままデプロイする。
 
-### GitHub Actions上でビルドする場合に必要なこと・懸念
+CodeBuildではbuildspecからAWS CLIなどのコマンドを実行でき、Actionsからの `StartBuild` でコミットや環境変数を指定できる。したがって、CodeBuildをデプロイ用の実行環境として使うことは可能である。[StartBuild API](https://docs.aws.amazon.com/codebuild/latest/APIReference/API_StartBuild.html) [buildspec reference](https://docs.aws.amazon.com/codebuild/latest/userguide/build-spec-ref.html)
 
-- Node.jsのバージョン、npm/pnpm/yarnのバージョン、OS依存パッケージをrunner上でそろえる。ロックファイルに基づくインストールとキャッシュ設定も必要になる。
-- ビルドを別jobに分けるなら、生成した `dist/` をActions artifactにアップロードし、公開jobでダウンロードする。両jobが同じコミットの成果物を扱うこと、artifactの保持期間・サイズを決める必要がある。
-- Actions側でAWS OIDC認証を行い、公開用S3への書き込みとCloudFront invalidationだけを許可するIAM権限を用意する。長期アクセスキーをSecretsに置かない。
-- private npm registryや社内依存パッケージを使う場合、runnerから接続できる経路と認証情報が必要。GitHub-hosted runnerから社内ネットワークへ到達できない構成では、self-hosted runnerや公開可能なパッケージミラーなどを用意する。
-- 大きなビルドやネイティブモジュールでrunnerのメモリ・ディスク・実行時間が足りるか確認する。必要なrunnerサイズやキャッシュを維持する担当も決める。
+### この分担にする場合の懸念
 
-### CodeBuildを使う場合に増える考慮点
+- **イメージの同一性**: ActionsからCodeBuildへイメージURIとコミットSHAを渡し、CodeBuild側で別のタグや `latest` に置き換えない。タグの上書きが可能なら、より確実なECR image digestを渡すか、ECRのタグ不変設定を使う。
+- **AWS権限の分離**: ActionsにはECRへのpush、指定CodeBuildプロジェクトの起動と結果確認を許可する。CodeBuildサービスロールには対象CloudFormation/ECS操作、必要なタスク実行ロールへのPassRole、ログ出力だけを許可する。CodeBuildのデプロイロールは実質的なデプロイ権限を持つため、対象スタックとサービスに絞る。
+- **buildspecの信頼性**: CodeBuildはbuildspecのコマンドをAWS権限付きで実行する。信頼できるmainのコミットに含まれるデプロイ定義を使い、Actionsから任意の `buildspecOverride` を渡せないようにする。CodeBuild起動権限を持つ人が任意コマンドを差し込めないよう権限とブランチ条件を制限する。
+- **承認の順序**: GitHubの `prod` 承認が済んでからCodeBuildを開始する。承認前に開始すると、未承認の変更でもデプロイ処理が動く。
+- **必要なCodeBuild設定**: デプロイ専用プロジェクト、buildspec、サービスロール、ログ出力が必要。デプロイ定義をGitHubから取る場合はCodeConnectionsの承認とソース読み取り権限も必要になる。CodeBuildをVPCに接続してprivateなエンドポイントへアクセスする場合、AWS APIや必要な外部サービスへの通信経路も確認する。
+- **GitHub Actionsでビルドする場合の準備**: Java/Dockerのバージョンを固定し、必要ならDocker Buildxやクロスプラットフォーム設定を追加する。ビルドを別jobに分ける場合はJARなどのartifactをjob間で転送する。runnerのCPU・メモリ・ディスク・実行時間、依存キャッシュ、private package registryへの接続と認証も用意する。
+- **失敗時の確認先**: ビルド失敗はActionsのjobログ、CD失敗はCodeBuild/CloudWatch LogsとCloudFormation/ECSイベントで調査する。CD後にActionsがURLを表示するなら、CodeBuildから完了状態・デプロイ結果をActionsへ返す方法も設計する。
 
-- CodeBuildのビルド環境、buildspec、GitHub接続、サービスロールを管理する。サービスロールはソース取得と成果物用S3への書き込みだけに絞る。
-- CodeBuildとActionsの間で成果物を受け渡すため、成果物S3の読み書き権限、暗号化キー、保存期間、削除ルールを決める。
-- Actionsのテスト結果とCodeBuildの本番ビルドが異なる成果物にならないよう、両方の処理で同じコミットSHAを固定する。テスト済み成果物をそのまま公開する設計が望ましい。
-- CodeBuildをVPCに接続してprivate registryへアクセスさせる場合、npm registryなどへの外向き通信も別途確保する。private subnetならNATや適切なVPC endpoint/プロキシが必要か確認する。
-- `prod` の承認はCodeBuild起動前に置く。承認前にビルドを始める設計だと、承認されない変更にもビルド時間と料金が発生する。
-
+この分担は技術的に可能だが、単純なECSデプロイではGitHub ActionsからCloudFormationを直接実行する方が設定要素は少ない。CodeBuildにCDを任せる利点は、デプロイ権限を専用サービスロールへ分離したい場合や、デプロイ処理をAWS側に集約したい場合に大きくなる。ここに記載したCI/CD分担は比較案であり、現在のワークフローはこの構成には変更していない。
