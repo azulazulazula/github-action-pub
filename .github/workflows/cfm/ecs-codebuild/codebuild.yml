@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodeBuild project for the ECS Hello World image — builds the exact GitHub commit and pushes it to the prototype ECR repository.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: CodeBuild clones the GitHub commit through CodeConnections, packages the Java app, then pushes its image to ECR.
+    must:
+      - Restrict source access to the configured GitHub repository and main branch.
+      - Keep the CodeBuild service role scoped to this project's logs and ECR repository.
+      - Do not place GitHub or AWS credentials in buildspec or plaintext parameters.
+      - Do not attach CodeBuild to a VPC without egress; the project needs GitHub and Docker registry access.
+
+Resources:
+  GitHubConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Gives CodeBuild a managed GitHub App connection without storing a personal access token.
+        must:
+          - Install the GitHub App for only the required repository.
+          - Complete the pending connection authorization in the AWS console before running a build.
+        mutable: review-required
+    Properties:
+      ConnectionName: !Sub "${AWS::StackName}-github"
+      ProviderType: GitHub
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-github"
+
+  CodeBuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Stores build logs for short-term troubleshooting.
+        must:
+          - Keep build logs on a bounded retention period.
+        mutable: review-required
+    Properties:
+      LogGroupName: /aws/codebuild/eiei-mun-ecs-codebuild
+      RetentionInDays: 7
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Gives CodeBuild only the repository checkout, ECR push, and build-log permissions required for this image.
+        must:
+          - Trust only codebuild.amazonaws.com.
+          - Keep ECR writes restricted to the Hello World image repository.
+          - Keep the GitHub connection restricted to this repository and main.
+        mutable: review-required
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-service-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BuildAndPushHelloWorldImage
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: UseOnlyThisGitHubRepository
+                Effect: Allow
+                Action:
+                  - codeconnections:UseConnection
+                Resource: !GetAtt GitHubConnection.ConnectionArn
+                Condition:
+                  StringEquals:
+                    codeconnections:FullRepositoryId: azulazulazula/github-action-pub
+                    codeconnections:ProviderAction: GitPull
+                    codeconnections:BranchName: main
+              - Sid: AuthenticateToEcr
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PushOnlyHelloWorldImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/hello-nginx"
+              - Sid: WriteBuildLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${CodeBuildLogGroup.Arn}:*"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-service-role"
+
+  EcsImageBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+      - CodeBuildLogGroup
+      - GitHubConnection
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Builds from a commit selected by GitHub Actions; Docker runs in CodeBuild and Actions continues with ECS deployment.
+        must:
+          - Keep the source pinned to the commit requested by the workflow.
+          - Keep Docker privileged mode enabled for image builds.
+          - Do not attach this builder to the prototype VPC; it needs public GitHub and registry egress.
+        mutable: review-required
+    Properties:
+      Name: !Sub "${AWS::StackName}-project"
+      Description: Build the Java Hello World JAR and push the Docker image to ECR.
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Source:
+        Type: GITHUB
+        Location: https://github.com/azulazulazula/github-action-pub
+        GitCloneDepth: 1
+        BuildSpec: .github/ecs/buildspec.yml
+        Auth:
+          Type: CODECONNECTIONS
+          Resource: !GetAtt GitHubConnection.ConnectionArn
+      SourceVersion: main
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:7.0
+        ComputeType: BUILD_GENERAL1_SMALL
+        PrivilegedMode: true
+        ImagePullCredentialsType: CODEBUILD
+        EnvironmentVariables:
+          - Name: IMAGE_REPO_URI
+            Type: PLAINTEXT
+            Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/hello-nginx"
+          - Name: IMAGE_TAG
+            Type: PLAINTEXT
+            Value: latest
+      TimeoutInMinutes: 30
+      QueuedTimeoutInMinutes: 30
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref CodeBuildLogGroup
+          StreamName: ecs-image-build
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-project"
+
+Outputs:
+  ProjectName:
+    Description: CodeBuild project used to build the ECS container image.
+    Value: !Ref EcsImageBuildProject
+  GitHubConnectionArn:
+    Description: GitHub connection that must have AVAILABLE status before builds can start.
+    Value: !GetAtt GitHubConnection.ConnectionArn
