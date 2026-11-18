@@ -1,0 +1,162 @@
+name: Provision ECS infrastructure
+run-name: Deploy ecs-infrastructure request ${{ inputs.request_id }}
+
+on:
+  workflow_call:
+    inputs:
+      request_id:
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Parent orchestration request identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provision-ecs-infrastructure
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: '798452926315'
+  VPC_STACK: eiei-mun-vpc-prototype
+  CODEBUILD_STACK: eiei-mun-ecs-codebuild
+  ECS_INFRA_STACK: eiei-mun-ecs-infrastructure
+
+jobs:
+  provision:
+    name: Provision CodeBuild and ECS foundation resources
+    runs-on: ubuntu-22.04
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
+
+      - name: Read and verify VPC outputs
+        id: vpc
+        run: |
+          set -euo pipefail
+          VPC_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "$VPC_STACK" \
+            --query 'Stacks[0].StackStatus' \
+            --output text)
+          case "$VPC_STATUS" in
+            CREATE_COMPLETE|UPDATE_COMPLETE) ;;
+            *)
+              echo "VPC stack is not ready: $VPC_STATUS" >&2
+              exit 1
+              ;;
+          esac
+
+          VPC_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$VPC_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue | [0]" \
+            --output text)
+          PUBLIC_SUBNET_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$VPC_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='PublicSubnetId'].OutputValue | [0]" \
+            --output text)
+          test "$VPC_ID" != "None"
+          test "$PUBLIC_SUBNET_ID" != "None"
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "public_subnet_id=$PUBLIC_SUBNET_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Validate and provision CodeBuild resources
+        run: |
+          set -euo pipefail
+          aws cloudformation validate-template \
+            --template-body file://.github/workflows/cfm/ecs-codebuild/codebuild.yml
+          aws cloudformation deploy \
+            --template-file .github/workflows/cfm/ecs-codebuild/codebuild.yml \
+            --stack-name "$CODEBUILD_STACK" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Validate and provision ECS foundation
+        env:
+          VPC_ID: ${{ steps.vpc.outputs.vpc_id }}
+        run: |
+          set -euo pipefail
+          aws cloudformation validate-template \
+            --template-body file://.github/workflows/cfm/ecs/ecs-infrastructure.yml
+          aws cloudformation deploy \
+            --template-file .github/workflows/cfm/ecs/ecs-infrastructure.yml \
+            --stack-name "$ECS_INFRA_STACK" \
+            --parameter-overrides VpcId="$VPC_ID" \
+            --no-fail-on-empty-changeset
+
+      - name: Confirm provisioned resource outputs
+        id: resources
+        run: |
+          set -euo pipefail
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query 'Stacks[0].StackStatus' \
+            --output text)
+          case "$STACK_STATUS" in
+            CREATE_COMPLETE|UPDATE_COMPLETE) ;;
+            *)
+              echo "ECS foundation stack is not ready: $STACK_STATUS" >&2
+              exit 1
+              ;;
+          esac
+
+          CLUSTER_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue | [0]" \
+            --output text)
+          SECURITY_GROUP_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='SecurityGroupId'].OutputValue | [0]" \
+            --output text)
+          LOG_GROUP_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue | [0]" \
+            --output text)
+          test "$CLUSTER_NAME" != "None"
+          test "$SECURITY_GROUP_ID" != "None"
+          test "$LOG_GROUP_NAME" != "None"
+
+          CLUSTER_STATUS=$(aws ecs describe-clusters \
+            --clusters "$CLUSTER_NAME" \
+            --query 'clusters[0].status' \
+            --output text)
+          test "$CLUSTER_STATUS" = "ACTIVE"
+          echo "ECS foundation is ready: $CLUSTER_NAME / $SECURITY_GROUP_ID / $LOG_GROUP_NAME" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Show one-time GitHub connection authorization status
+        run: |
+          set -euo pipefail
+          CONNECTION_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "$CODEBUILD_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='GitHubConnectionArn'].OutputValue | [0]" \
+            --output text)
+          test "$CONNECTION_ARN" != "None"
+          CONNECTION_STATUS=$(aws codeconnections get-connection \
+            --connection-arn "$CONNECTION_ARN" \
+            --query 'Connection.ConnectionStatus' \
+            --output text)
+          if [[ "$CONNECTION_STATUS" == "AVAILABLE" ]]; then
+            echo "GitHub connection is AVAILABLE." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ECS foundation is ready. GitHub connection still needs authorization: $CONNECTION_STATUS" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "Authorize it in AWS Developer Tools > Settings > Connections before running the application deployment workflow." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "https://ap-south-1.console.aws.amazon.com/codesuite/settings/connections?region=ap-south-1" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
