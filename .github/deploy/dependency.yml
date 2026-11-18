@@ -22,15 +22,25 @@ resources:
     workflow: .github/workflows/deploy-ec2.yml
     template: .github/workflows/cfm/ec2.yml
 
-  ecs:
+  ecs-infrastructure:
+    paths:
+      - .github/workflows/cfm/ecs/ecs-infrastructure.yml
+      - .github/workflows/cfm/ecs-codebuild/**
+      - .github/workflows/provision-ecs-infrastructure.yml
+    depends_on:
+      - vpc
+    workflow: .github/workflows/provision-ecs-infrastructure.yml
+    template: .github/workflows/cfm/ecs/ecs-infrastructure.yml
+
+  ecs-application:
     paths:
       - Dockerfile
       - src/**
       - .github/ecs/**
-      - .github/workflows/cfm/ecs/**
-      - .github/workflows/cfm/ecs-codebuild/**
-      - .github/workflows/deploy-ecs-codebuild.yml
+      - .github/workflows/cfm/ecs/ecs-application.yml
+      - .github/workflows/deploy-ecs-application.yml
     depends_on:
       - vpc
-    workflow: .github/workflows/deploy-ecs-codebuild.yml
-    template: .github/workflows/cfm/ecs/ecs.yml
+      - ecs-infrastructure
+    workflow: .github/workflows/deploy-ecs-application.yml
+    template: .github/workflows/cfm/ecs/ecs-application.yml
