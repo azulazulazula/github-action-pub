@@ -125,11 +125,11 @@ jobs:
             --output text)
           test "$SUBNET_VPC_ID" = "$VPC_ID"
 
-          FOUND_SECURITY_GROUP=$(aws ec2 describe-security-groups \
+          SECURITY_GROUP_VPC_ID=$(aws ec2 describe-security-groups \
             --group-ids "$SECURITY_GROUP_ID" \
-            --query 'SecurityGroups[0].GroupId' \
+            --query 'SecurityGroups[0].VpcId' \
             --output text)
-          test "$FOUND_SECURITY_GROUP" = "$SECURITY_GROUP_ID"
+          test "$SECURITY_GROUP_VPC_ID" = "$VPC_ID"
 
           FOUND_LOG_GROUP=$(aws logs describe-log-groups \
             --log-group-name-prefix "$LOG_GROUP_NAME" \
