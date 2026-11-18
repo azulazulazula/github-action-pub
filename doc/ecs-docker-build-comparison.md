@@ -27,28 +27,26 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[GitHub mainへの変更] --> B[親ワークフロー]
-    B --> C[VPC依存を先に処理]
-    C --> D[deploy-ecs-codebuild job<br/>GitHub-hosted runner]
-    D --> D1[AWS OIDCで認証]
-    D1 --> D2[CodeBuildスタックを確認・更新]
-    D2 --> D3{GitHub接続はAVAILABLE?}
-    D3 -- 初回はPENDING --> D4[AWSコンソールで接続を承認]
-    D4 --> D5[親ワークフローを再実行]
-    D3 -- 承認済み --> E[対象commit SHAでCodeBuild開始]
-    D5 --> E
-    E --> F[CodeBuildがGitHubから同じSHAを取得]
-    F --> F1[Java 21でJARを作成]
-    F1 --> F2[Docker build]
-    F2 --> F3[ECRへpush<br/>commit SHAタグ]
-    F3 --> G[GitHub Actionsがビルド成功を確認]
-    G --> H[CloudFormationでECSを更新]
-    H --> I[ECSサービス安定化・URL表示]
+    A[mainへの変更] --> B[親ワークフロー]
+    B --> C[VPCを先に確認・投入]
+    C --> D[provision-ecs-infrastructure.yml]
+    D --> D1[CodeBuild接続/プロジェクトと<br/>ECS基盤スタックを用意]
+    D1 --> D2{GitHub接続はAVAILABLE?}
+    D2 -- PENDING --> D3[AWSコンソールで接続承認]
+    D3 --> D4[アプリワークフローを再実行]
+    D2 -- AVAILABLE --> E[deploy-ecs-application.yml]
+    D4 --> E
+    E --> E1[prod承認と基盤の事前確認]
+    E1 --> F[対象commit SHAでCodeBuild開始]
+    F --> F1[Java/JARとDocker imageを作成]
+    F1 --> F2[ECRへpush<br/>commit SHAタグ]
+    F2 --> G[ActionsがCloudFormationで<br/>タスク定義/サービスを更新]
+    G --> H[ECSサービス安定化・URL表示]
 ```
 
-- GitHub ActionsはCodeBuildプロジェクトを用意し、対象コミットを指定してビルドを依頼する。
+- 基盤ワークフローがCodeBuildプロジェクトとECS基盤をCloudFormationで用意する。アプリワークフローは対象コミットを指定してCodeBuildを起動する。
 - CodeBuildはGitHub App接続を使い、そのコミットのソースを取得する。JAR作成とDocker build/pushはCodeBuildのビルド環境上で行う。
-- GitHub ActionsはCodeBuildの完了を待ち、成功後にECSをデプロイする。CodeBuildのビルドログはCloudWatch Logsでも確認できる。
+- CodeBuildの完了後、アプリワークフローがアプリケーション用CloudFormationスタックを更新する。CodeBuildのビルドログはCloudWatch Logsでも確認できる。
 - GitHub Actionsもワークフロー実行・AWS認証・ECSデプロイのために引き続き使う。移るのはJARとDockerイメージのビルド処理。
 
 ## 違いの一覧
@@ -74,7 +72,7 @@ flowchart LR
 
 ## このリポジトリでの現在の使い分け
 
-親ワークフローの依存関係定義はECSリソースを `deploy-ecs-codebuild.yml` に割り当てている。そのため、Dockerfileや `src/**` の変更で親ワークフローが動くと、通常はCodeBuild方式が実行される。
+親ワークフローの依存関係定義はECSを `ecs-infrastructure` と `ecs-application` に分割し、基盤を先に実行する。Dockerfileや `src/**` の変更では、基盤の確認後に `deploy-ecs-application.yml` がCodeBuildでイメージを作り、CloudFormationでECSアプリを更新する。
 
 `deploy-ecs-hello-world.yml` はGitHub Actions内でビルドする比較用の別ワークフローとして残っている。通常の親ワークフローから自動選択される方式ではない。
 
