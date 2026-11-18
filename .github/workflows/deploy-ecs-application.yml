@@ -1,0 +1,286 @@
+name: Deploy ECS application
+run-name: Deploy ecs-application request ${{ inputs.request_id }}
+
+on:
+  workflow_call:
+    inputs:
+      request_id:
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Parent orchestration request identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-ecs-application
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: '798452926315'
+  VPC_STACK: eiei-mun-vpc-prototype
+  CODEBUILD_STACK: eiei-mun-ecs-codebuild
+  CODEBUILD_PROJECT: eiei-mun-ecs-codebuild-project
+  ECS_INFRA_STACK: eiei-mun-ecs-infrastructure
+  ECS_APP_STACK: eiei-mun-ecs-application
+  ECR_REPOSITORY: hello-nginx
+
+jobs:
+  deploy:
+    name: Verify infrastructure, build image, and deploy application
+    runs-on: ubuntu-22.04
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
+
+      - name: Verify AWS infrastructure prerequisites
+        id: prerequisites
+        run: |
+          set -euo pipefail
+
+          require_complete_stack() {
+            local stack_name="$1"
+            local status
+            status=$(aws cloudformation describe-stacks \
+              --stack-name "$stack_name" \
+              --query 'Stacks[0].StackStatus' \
+              --output text)
+            case "$status" in
+              CREATE_COMPLETE|UPDATE_COMPLETE) ;;
+              *)
+                echo "Required stack $stack_name is not ready: $status" >&2
+                exit 1
+                ;;
+            esac
+          }
+
+          require_complete_stack "$VPC_STACK"
+          require_complete_stack "$CODEBUILD_STACK"
+          require_complete_stack "$ECS_INFRA_STACK"
+
+          VPC_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$VPC_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue | [0]" \
+            --output text)
+          PUBLIC_SUBNET_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$VPC_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='PublicSubnetId'].OutputValue | [0]" \
+            --output text)
+
+          CLUSTER_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue | [0]" \
+            --output text)
+          CLUSTER_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ClusterArn'].OutputValue | [0]" \
+            --output text)
+          SECURITY_GROUP_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='SecurityGroupId'].OutputValue | [0]" \
+            --output text)
+          LOG_GROUP_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue | [0]" \
+            --output text)
+          FOUNDATION_VPC_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue | [0]" \
+            --output text)
+
+          for value in "$VPC_ID" "$PUBLIC_SUBNET_ID" "$CLUSTER_NAME" "$CLUSTER_ARN" "$SECURITY_GROUP_ID" "$LOG_GROUP_NAME" "$FOUNDATION_VPC_ID"; do
+            test "$value" != "None"
+            test -n "$value"
+          done
+          test "$VPC_ID" = "$FOUNDATION_VPC_ID"
+
+          CLUSTER_STATUS=$(aws ecs describe-clusters \
+            --clusters "$CLUSTER_ARN" \
+            --query 'clusters[0].status' \
+            --output text)
+          test "$CLUSTER_STATUS" = "ACTIVE"
+
+          SUBNET_VPC_ID=$(aws ec2 describe-subnets \
+            --subnet-ids "$PUBLIC_SUBNET_ID" \
+            --query 'Subnets[0].VpcId' \
+            --output text)
+          test "$SUBNET_VPC_ID" = "$VPC_ID"
+
+          FOUND_SECURITY_GROUP=$(aws ec2 describe-security-groups \
+            --group-ids "$SECURITY_GROUP_ID" \
+            --query 'SecurityGroups[0].GroupId' \
+            --output text)
+          test "$FOUND_SECURITY_GROUP" = "$SECURITY_GROUP_ID"
+
+          FOUND_LOG_GROUP=$(aws logs describe-log-groups \
+            --log-group-name-prefix "$LOG_GROUP_NAME" \
+            --query "logGroups[?logGroupName=='$LOG_GROUP_NAME'].logGroupName | [0]" \
+            --output text)
+          test "$FOUND_LOG_GROUP" = "$LOG_GROUP_NAME"
+
+          aws ecr describe-repositories \
+            --repository-names "$ECR_REPOSITORY" \
+            --query 'repositories[0].repositoryUri' \
+            --output text
+
+          PROJECT_NAME=$(aws codebuild batch-get-projects \
+            --names "$CODEBUILD_PROJECT" \
+            --query 'projects[0].name' \
+            --output text)
+          test "$PROJECT_NAME" = "$CODEBUILD_PROJECT"
+
+          CONNECTION_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "$CODEBUILD_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='GitHubConnectionArn'].OutputValue | [0]" \
+            --output text)
+          test "$CONNECTION_ARN" != "None"
+          CONNECTION_STATUS=$(aws codeconnections get-connection \
+            --connection-arn "$CONNECTION_ARN" \
+            --query 'Connection.ConnectionStatus' \
+            --output text)
+          if [[ "$CONNECTION_STATUS" != "AVAILABLE" ]]; then
+            echo "GitHub connection is $CONNECTION_STATUS. Authorize it in AWS Developer Tools > Settings > Connections, then rerun this workflow." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "https://ap-south-1.console.aws.amazon.com/codesuite/settings/connections?region=ap-south-1" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "ECS foundation, VPC, ECR, CodeBuild project, and GitHub connection are ready." | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "cluster_arn=$CLUSTER_ARN" >> "$GITHUB_OUTPUT"
+          echo "security_group_id=$SECURITY_GROUP_ID" >> "$GITHUB_OUTPUT"
+          echo "log_group_name=$LOG_GROUP_NAME" >> "$GITHUB_OUTPUT"
+          echo "public_subnet_id=$PUBLIC_SUBNET_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Read Docker base image
+        id: image-metadata
+        run: |
+          set -euo pipefail
+          FROM_IMAGE="$(awk '$1 == "FROM" { image=$NF; sub(/#.*/, "", image); print image; exit }' Dockerfile)"
+          if [[ -z "$FROM_IMAGE" ]]; then
+            echo "No FROM image found in Dockerfile" >&2
+            exit 1
+          fi
+          echo "base_image=${FROM_IMAGE%:*}" >> "$GITHUB_OUTPUT"
+
+      - name: Start CodeBuild image build
+        id: build
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE_REPO_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY"
+          BUILD_ID=$(aws codebuild start-build \
+            --project-name "$CODEBUILD_PROJECT" \
+            --source-version "$GITHUB_SHA" \
+            --environment-variables-override \
+              name=IMAGE_REPO_URI,value="$IMAGE_REPO_URI",type=PLAINTEXT \
+              name=IMAGE_TAG,value="$IMAGE_TAG",type=PLAINTEXT \
+            --query 'build.id' \
+            --output text)
+          echo "id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "uri=$IMAGE_REPO_URI:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for CodeBuild image build
+        env:
+          BUILD_ID: ${{ steps.build.outputs.id }}
+        run: |
+          set -euo pipefail
+          BUILD_STATUS="IN_PROGRESS"
+          for attempt in $(seq 1 120); do
+            BUILD_STATUS=$(aws codebuild batch-get-builds \
+              --ids "$BUILD_ID" \
+              --query 'builds[0].buildStatus' \
+              --output text)
+            case "$BUILD_STATUS" in
+              SUCCEEDED) break ;;
+              FAILED|FAULT|STOPPED|TIMED_OUT)
+                echo "CodeBuild finished with status: $BUILD_STATUS" >&2
+                exit 1
+                ;;
+              *)
+                sleep 15
+                ;;
+            esac
+          done
+          if [[ "$BUILD_STATUS" != "SUCCEEDED" ]]; then
+            echo "Timed out waiting for CodeBuild: $BUILD_ID" >&2
+            exit 1
+          fi
+
+      - name: Deploy application to the existing ECS foundation
+        env:
+          IMAGE_URI: ${{ steps.build.outputs.uri }}
+          BASE_IMAGE: ${{ steps.image-metadata.outputs.base_image }}
+          SOURCE_REVISION: ${{ github.sha }}
+          CLUSTER_ARN: ${{ steps.prerequisites.outputs.cluster_arn }}
+          SECURITY_GROUP_ID: ${{ steps.prerequisites.outputs.security_group_id }}
+          LOG_GROUP_NAME: ${{ steps.prerequisites.outputs.log_group_name }}
+          PUBLIC_SUBNET_ID: ${{ steps.prerequisites.outputs.public_subnet_id }}
+        run: |
+          set -euo pipefail
+          aws cloudformation validate-template \
+            --template-body file://.github/workflows/cfm/ecs/ecs-application.yml
+          aws cloudformation deploy \
+            --template-file .github/workflows/cfm/ecs/ecs-application.yml \
+            --stack-name "$ECS_APP_STACK" \
+            --parameter-overrides \
+              ImageUri="$IMAGE_URI" \
+              BaseImage="$BASE_IMAGE" \
+              SourceRevision="$SOURCE_REVISION" \
+              ClusterArn="$CLUSTER_ARN" \
+              SecurityGroupId="$SECURITY_GROUP_ID" \
+              LogGroupName="$LOG_GROUP_NAME" \
+              PublicSubnetId="$PUBLIC_SUBNET_ID" \
+            --no-fail-on-empty-changeset
+
+          ECS_CLUSTER=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_INFRA_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue | [0]" \
+            --output text)
+          ECS_SERVICE=$(aws cloudformation describe-stacks \
+            --stack-name "$ECS_APP_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceName'].OutputValue | [0]" \
+            --output text)
+          test "$ECS_CLUSTER" != "None"
+          test "$ECS_SERVICE" != "None"
+
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+
+          TASK_ARN=$(aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --service-name "$ECS_SERVICE" \
+            --desired-status RUNNING \
+            --query 'taskArns[0]' \
+            --output text)
+          test "$TASK_ARN" != "None"
+          ENI_ID=$(aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" \
+            --output text)
+          test "$ENI_ID" != "None"
+          PUBLIC_IP=$(aws ec2 describe-network-interfaces \
+            --network-interface-ids "$ENI_ID" \
+            --query 'NetworkInterfaces[0].Association.PublicIp' \
+            --output text)
+          test "$PUBLIC_IP" != "None"
+
+          echo "Hello World URL: http://$PUBLIC_IP" | tee -a "$GITHUB_STEP_SUMMARY"
