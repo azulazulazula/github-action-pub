@@ -6,7 +6,7 @@ Docker imageをECRへ送り、ECSを更新するまでの処理を、GitHub Acti
 
 ## 案1: CodeBuildがイメージを作り、ActionsがECSをデプロイ
 
-現在PR #24で実装した方式。
+現在の実装方式。基盤リソース投入とアプリデプロイは別ワークフローに分かれているが、イメージビルド/ECR pushはCodeBuild、ECSアプリのCloudFormation更新はActionsが担当する。
 
 ```mermaid
 flowchart LR
@@ -22,7 +22,7 @@ flowchart LR
     D1 --> E[ECSサービス安定化・URL表示]
 ```
 
-- **GitHub Actions**: 承認、CodeBuild起動、完了待ち、ECS CloudFormationデプロイ。
+- **GitHub Actions**: 基盤ワークフローでCodeBuild/ECS基盤を作成し、アプリワークフローで承認・CodeBuild起動・完了待ち・ECSアプリCloudFormation更新を行う。
 - **CodeBuild**: ソース取得、JAR作成、Docker build、ECR push。
 - **受け渡すもの**: commit SHA。CodeBuildはCodeConnections経由でそのSHAを取得する。
 - **良い点**: ActionsにDockerビルド環境を用意せず、CodeBuildにビルド処理を集められる。
@@ -97,7 +97,7 @@ flowchart LR
 
 ## どの案を選ぶか
 
-- 現行PR #24は **案1**。すでにCodeBuildがDocker imageを作成・pushし、ActionsがECSを更新する。
+- 現行構成は **案1**。基盤投入とアプリデプロイのワークフローは分離し、CodeBuildがDocker imageを作成・push、ActionsがECSアプリスタックを更新する。
 - ActionsにDocker buildを任せ、CodeBuildをデプロイ専用にするなら **案2**。単純なECS更新だけなら、ActionsがCloudFormationを直接呼ぶ方が構成要素は少ない。
 - ActionsのJava検証済みJARをAWS側へ渡し、Docker build以降をCodeBuildへまとめるなら **案3**。S3での成果物受け渡しとchecksum確認が増える。
 - どの案でも、デプロイ時には信頼済みmainのcommit SHAを固定し、ECRのdigestまたはS3 object versionで同一成果物を追跡する。
