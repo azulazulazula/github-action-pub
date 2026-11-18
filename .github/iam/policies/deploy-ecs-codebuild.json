@@ -19,7 +19,11 @@
         "arn:aws:cloudformation:ap-south-1:798452926315:stack/eiei-mun-ecs-codebuild/*",
         "arn:aws:cloudformation:ap-south-1:798452926315:stack/eiei-mun-ecs-prototype/*",
         "arn:aws:cloudformation:ap-south-1:798452926315:changeSet/eiei-mun-ecs-codebuild/*",
-        "arn:aws:cloudformation:ap-south-1:798452926315:changeSet/eiei-mun-ecs-prototype/*"
+        "arn:aws:cloudformation:ap-south-1:798452926315:changeSet/eiei-mun-ecs-prototype/*",
+        "arn:aws:cloudformation:ap-south-1:798452926315:stack/eiei-mun-ecs-infrastructure/*",
+        "arn:aws:cloudformation:ap-south-1:798452926315:stack/eiei-mun-ecs-application/*",
+        "arn:aws:cloudformation:ap-south-1:798452926315:changeSet/eiei-mun-ecs-infrastructure/*",
+        "arn:aws:cloudformation:ap-south-1:798452926315:changeSet/eiei-mun-ecs-application/*"
       ]
     },
     {
@@ -116,7 +120,10 @@
         "ecs:TagResource",
         "ecs:UntagResource"
       ],
-      "Resource": "arn:aws:ecs:ap-south-1:798452926315:cluster/eiei-mun-ecs-prototype-cluster"
+      "Resource": [
+        "arn:aws:ecs:ap-south-1:798452926315:cluster/eiei-mun-ecs-infrastructure-cluster",
+        "arn:aws:ecs:ap-south-1:798452926315:cluster/eiei-mun-ecs-prototype-cluster"
+      ]
     },
     {
       "Sid": "ManageEcsPrototypeTaskDefinition",
@@ -128,7 +135,10 @@
         "ecs:TagResource",
         "ecs:UntagResource"
       ],
-      "Resource": "arn:aws:ecs:ap-south-1:798452926315:task-definition/eiei-mun-ecs-prototype-task:*"
+      "Resource": [
+        "arn:aws:ecs:ap-south-1:798452926315:task-definition/eiei-mun-ecs-application-task:*",
+        "arn:aws:ecs:ap-south-1:798452926315:task-definition/eiei-mun-ecs-prototype-task:*"
+      ]
     },
     {
       "Sid": "ManageEcsPrototypeService",
@@ -142,6 +152,8 @@
         "ecs:UntagResource"
       ],
       "Resource": [
+        "arn:aws:ecs:ap-south-1:798452926315:service/eiei-mun-ecs-infrastructure-cluster/eiei-mun-ecs-application-service",
+        "arn:aws:ecs:ap-south-1:798452926315:cluster/eiei-mun-ecs-infrastructure-cluster",
         "arn:aws:ecs:ap-south-1:798452926315:service/eiei-mun-ecs-prototype-cluster/eiei-mun-ecs-prototype-service",
         "arn:aws:ecs:ap-south-1:798452926315:cluster/eiei-mun-ecs-prototype-cluster"
       ]
@@ -168,7 +180,10 @@
       "Resource": "arn:aws:ec2:ap-south-1:798452926315:security-group/*",
       "Condition": {
         "StringLike": {
-          "aws:ResourceTag/Name": "eiei-mun-ecs-prototype*"
+          "aws:ResourceTag/Name": [
+            "eiei-mun-ecs-infrastructure*",
+            "eiei-mun-ecs-prototype*"
+          ]
         }
       }
     },
@@ -182,7 +197,10 @@
           "aws:RequestedRegion": "ap-south-1"
         },
         "StringLike": {
-          "aws:RequestTag/Name": "eiei-mun-ecs-prototype*"
+          "aws:RequestTag/Name": [
+            "eiei-mun-ecs-infrastructure*",
+            "eiei-mun-ecs-prototype*"
+          ]
         }
       }
     },
@@ -192,7 +210,8 @@
       "Action": [
         "ec2:DescribeVpcs",
         "ec2:DescribeSecurityGroups",
-        "ec2:DescribeNetworkInterfaces"
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeSubnets"
       ],
       "Resource": "*"
     },
@@ -213,7 +232,11 @@
         "arn:aws:logs:ap-south-1:798452926315:log-group:/aws/codebuild/eiei-mun-ecs-codebuild",
         "arn:aws:logs:ap-south-1:798452926315:log-group:/aws/codebuild/eiei-mun-ecs-codebuild:*",
         "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-prototype",
-        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-prototype:*"
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-prototype:*",
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-infrastructure",
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-infrastructure:*",
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-application",
+        "arn:aws:logs:ap-south-1:798452926315:log-group:/ecs/eiei-mun-ecs-application:*"
       ]
     },
     {

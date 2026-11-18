@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Hello World ECS application release — creates and updates the task definition and service using pre-provisioned ECS foundation resources.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: Application stack consumes the separate ECS foundation outputs; each release supplies the commit-tagged ECR image.
+    must:
+      - Deploy the ECS foundation stack and VPC before applying this template.
+      - Keep the app container reachable only through the in-task Nginx proxy.
+      - Keep the Java app health check and Nginx startup dependency.
+      - Keep task tags for base image and source revision.
+      - Public HTTP access is for this temporary prototype only.
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: ECR image URI produced by the CodeBuild image workflow.
+  BaseImage:
+    Type: String
+    Description: Base image name from the Dockerfile FROM instruction.
+  SourceRevision:
+    Type: String
+    Description: Git commit deployed to this service.
+  ClusterArn:
+    Type: String
+    Description: Existing ECS cluster ARN from the ECS foundation stack.
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Existing task security group from the ECS foundation stack.
+  LogGroupName:
+    Type: String
+    Description: Existing application log group from the ECS foundation stack.
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Existing public subnet in the dedicated prototype VPC.
+
+Resources:
+  HelloWorldTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Runs the built Java JAR with an in-task Nginx proxy; 256 CPU and 512 MiB are sufficient for the prototype.
+        must:
+          - Use the commit-tagged image supplied by the deployment workflow.
+          - Keep the Java app health check and Nginx startup dependency.
+          - Tag each task definition revision with the Docker base image and source commit.
+        mutable: review-required
+    Properties:
+      Family: !Sub "${AWS::StackName}-task"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: arn:aws:iam::798452926315:role/ecsTaskExecutionRole
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: hello-world
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - Name: app
+              ContainerPort: 8080
+              Protocol: tcp
+              AppProtocol: http
+          HealthCheck:
+            Command:
+              - CMD
+              - java
+              - -cp
+              - /app/hello-world.jar
+              - hello.HealthCheck
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 20
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupName
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
+        - Name: hello-world-proxy
+          Image: nginx:alpine
+          Essential: true
+          DependsOn:
+            - ContainerName: hello-world
+              Condition: HEALTHY
+          PortMappings:
+            - Name: http
+              ContainerPort: 80
+              Protocol: tcp
+              AppProtocol: http
+          Command:
+            - /bin/sh
+            - -c
+            - |
+              cat > /etc/nginx/conf.d/default.conf <<'EOF'
+              server {
+                listen 80;
+                location / {
+                  proxy_pass http://127.0.0.1:8080;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                }
+              }
+              EOF
+              exec nginx -g 'daemon off;'
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - wget -q -O /dev/null http://127.0.0.1/ || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 10
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupName
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: proxy
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-task"
+        - Key: base-image
+          Value: !Ref BaseImage
+        - Key: source-revision
+          Value: !Ref SourceRevision
+
+  HelloWorldService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HelloWorldTaskDefinition
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Keeps one Fargate task running with a public IP in the dedicated public subnet.
+        must:
+          - Use the cluster, security group, log group, and subnet created by the infrastructure workflow.
+          - Keep AssignPublicIp enabled for browser access and image pull from this public-subnet prototype.
+          - Keep DesiredCount at one for the cost-conscious prototype.
+        mutable: review-required
+    Properties:
+      ServiceName: !Sub "${AWS::StackName}-service"
+      Cluster: !Ref ClusterArn
+      TaskDefinition: !Ref HelloWorldTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnetId
+          SecurityGroups:
+            - !Ref SecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-service"
+
+Outputs:
+  ClusterArn:
+    Description: Cluster hosting the Hello World service.
+    Value: !Ref ClusterArn
+  ServiceName:
+    Description: ECS service name managed by this application stack.
+    Value: !GetAtt HelloWorldService.Name
+  TaskDefinitionArn:
+    Description: Registered application task definition revision.
+    Value: !Ref HelloWorldTaskDefinition
+  SecurityGroupId:
+    Description: Task security group from the ECS foundation stack.
+    Value: !Ref SecurityGroupId
