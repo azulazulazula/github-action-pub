@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ECS foundation for the Hello World service — provisions stable cluster, network, and logging resources separately from application releases.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: Public prototype VPC + ECS cluster, task security group, and log group; application task definition/service are created by the separate application stack.
+    must:
+      - Keep this stack limited to resources needed before application deployment.
+      - Keep the task security group dedicated to the Hello World service.
+      - Public HTTP access is for this temporary prototype only.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Dedicated prototype VPC that hosts the ECS task.
+
+Resources:
+  HelloWorldLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Pre-creates the bounded-retention log group used by application task revisions.
+        must:
+          - Keep a bounded retention period for this prototype.
+        mutable: review-required
+    Properties:
+      LogGroupName: !Sub "/ecs/${AWS::StackName}"
+      RetentionInDays: 7
+
+  HelloWorldSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Dedicated task security group; browser traffic reaches Nginx on port 80 while the Java port remains private.
+        must:
+          - Do not attach this group to unrelated workloads.
+          - Keep application port 8080 closed to external ingress.
+          - Keep public HTTP limited to this temporary Hello World prototype.
+        mutable: review-required
+    Properties:
+      GroupDescription: Public HTTP access to the Hello World Nginx proxy
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Browser access to the temporary prototype web page
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-tasks"
+
+  HelloWorldCluster:
+    Type: AWS::ECS::Cluster
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Isolated Fargate cluster that remains available across application releases.
+        must:
+          - Keep this prototype isolated from unrelated application clusters.
+        mutable: review-required
+    Properties:
+      ClusterName: !Sub "${AWS::StackName}-cluster"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-cluster"
+
+Outputs:
+  ClusterName:
+    Description: ECS cluster name for application deployment.
+    Value: !Ref HelloWorldCluster
+  ClusterArn:
+    Description: ECS cluster ARN for application deployment.
+    Value: !GetAtt HelloWorldCluster.Arn
+  SecurityGroupId:
+    Description: Dedicated task security group allowing prototype HTTP traffic.
+    Value: !Ref HelloWorldSecurityGroup
+  LogGroupName:
+    Description: Pre-created application log group.
+    Value: !Ref HelloWorldLogGroup
+  VpcId:
+    Description: VPC that contains the ECS task security group.
+    Value: !Ref VpcId
