@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Private S3 bucket prototype with encryption, versioning, and public access blocked.
-# S3単体の変更検知を確認するためのコメント（CloudFormationの設定には影響しません）。
+# S3単独の差分検知と、PR承認後の親ワークフロー実行を確認するためのコメントです。
 
 Metadata:
   AWSToolsMetrics:
