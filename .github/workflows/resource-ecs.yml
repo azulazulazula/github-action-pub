@@ -1,0 +1,21 @@
+name: Echo ECS resource
+
+on:
+  workflow_dispatch:
+    inputs:
+      parent_run_id:
+        description: Parent workflow run identifier
+        required: true
+        type: string
+
+run-name: Echo ECS from parent ${{ inputs.parent_run_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  echo-service:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo service name
+        run: echo "ECS"
