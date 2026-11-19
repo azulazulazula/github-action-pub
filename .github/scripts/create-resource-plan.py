@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a changed-resource plan from depend.txt."""
+"""depend.txtと変更ファイルから実行対象の計画を作成する。"""
 
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ def main() -> int:
             )
         }
 
-        # A changed prerequisite also schedules every resource that consumes it.
+        # 依存先が変更された場合、そのリソースを利用する側も実行対象に加える。
         selected = set(directly_changed)
         while True:
             newly_selected = {
