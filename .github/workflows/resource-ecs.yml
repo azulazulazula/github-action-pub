@@ -3,12 +3,12 @@ name: Echo ECS resource
 on:
   workflow_dispatch:
     inputs:
-      parent_run_id:
-        description: Parent workflow run identifier
+      request_id:
+        description: Unique parent request identifier
         required: true
         type: string
 
-run-name: Echo ECS from parent ${{ inputs.parent_run_id }}
+run-name: Echo ECS from parent ${{ inputs.request_id }}
 
 permissions:
   contents: read
