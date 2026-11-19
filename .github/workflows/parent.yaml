@@ -28,7 +28,7 @@ jobs:
           fi
 
           while IFS= read -r service || [[ -n "$service" ]]; do
-            service="${service%$'\\r'}"
+            service="${service%$'\r'}"
             if [[ -n "$service" ]]; then
               echo "$service"
             fi
