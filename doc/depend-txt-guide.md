@@ -48,10 +48,10 @@ ECS | .github/workflows/cfm/ecs/**,Dockerfile,src/** | VPC
 ## サービスを追加するとき
 
 1. `depend.txt` にサービス名、監視パス、依存先を追加します。
-2. 対応する `.github/workflows/resource-<小文字のサービス名>.yml` を追加します。
-3. 依存先のサービス名が `depend.txt` に定義されていることを確認します。
+2. 依存先のサービス名が `depend.txt` に定義されていることを確認します。
+3. 子ワークフローで個別処理が必要な場合は、共通の `.github/workflows/childresource.yaml` にサービス名に応じた処理を追加します。
 
-`workflow_dispatch` で子ワークフローを起動するため、子のYAMLはGitHub Actionsが認識する `.github/workflows/` 直下に置いてください。
+サービス名は親から `service_name` 入力として共通ワークフローへ渡されます。子ワークフローのファイルをサービスごとに追加する必要はありません。
 
 ## トリガー
 
