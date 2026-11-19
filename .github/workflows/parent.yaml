@@ -2,9 +2,6 @@ name: Echo AWS service list
 
 on:
   pull_request:
-    paths:
-      - 'depend.txt'
-      - '.github/workflows/parent.yaml'
   workflow_dispatch:
 
 permissions:
