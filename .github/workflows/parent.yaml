@@ -96,12 +96,11 @@ jobs:
           mapfile -t services < <(jq -r '.execution_order[]' "$PLAN_FILE")
           index=0
           for service in "${services[@]}"; do
-            service_key=$(printf '%s' "$service" | tr '[:upper:]' '[:lower:]')
             service_display=$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')
-            workflow_file="resource-$service_key.yml"
+            workflow_file="childresource.yaml"
             workflow_path=".github/workflows/$workflow_file"
             if [[ ! -f "$workflow_path" ]]; then
-              echo "No child workflow exists for service '$service' ($workflow_path)." >&2
+              echo "共通子ワークフローが見つかりません: $workflow_path (サービス: $service)" >&2
               exit 1
             fi
 
@@ -109,9 +108,10 @@ jobs:
             request_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$index"
             expected_title="Echo $service_display from parent $request_id"
 
-            echo "Dispatching $workflow_file for $service (request $request_id)"
+            echo "共通子ワークフローを起動します: $service (request $request_id)"
             gh workflow run "$workflow_file" \
               --ref "$TARGET_REF" \
+              --field "service_name=$service_display" \
               --field "request_id=$request_id"
 
             child_run_id=""
