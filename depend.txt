@@ -1,4 +1,4 @@
-# SERVICE | WATCH_PATHS | DEPENDS_ON
+# サービス名 | 監視パス | 依存先
 VPC | .github/workflows/cfm/vpc/** | -
 S3 | .github/workflows/cfm/s3/** | -
 EC2 | .github/workflows/cfm/ec2.yml | VPC
