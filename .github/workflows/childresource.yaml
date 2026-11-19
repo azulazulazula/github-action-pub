@@ -1,0 +1,27 @@
+name: Child resource workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 実行対象のサービス名
+        required: true
+        type: string
+      request_id:
+        description: 親ワークフローのリクエストID
+        required: true
+        type: string
+
+run-name: Echo ${{ inputs.service_name }} from parent ${{ inputs.request_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  echo-service:
+    runs-on: ubuntu-latest
+    steps:
+      - name: サービス名を表示
+        env:
+          SERVICE_NAME: ${{ inputs.service_name }}
+        run: echo "$SERVICE_NAME"
