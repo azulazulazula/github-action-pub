@@ -2,16 +2,14 @@ name: Parent resource workflow
 run-name: Parent resource workflow request ${{ github.run_id }}-${{ github.run_attempt }}
 
 on:
-  # pull_request:
-  #   paths:
-  #     - 'depend.txt'
-  #     - '.github/workflows/cfm/**'
-  #     - 'Dockerfile'
-  #     - 'src/**'
+  # main宛てのPRで起動し、変更対象の判定はdepend.txtに集約します。
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       compare_to:
-        description: Base branch used to detect changes for manual runs
+        description: 手動実行で変更比較の基準にするブランチ
         required: true
         default: main
         type: string
