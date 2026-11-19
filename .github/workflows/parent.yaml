@@ -3,7 +3,18 @@ run-name: Parent resource workflow request ${{ github.run_id }}-${{ github.run_a
 
 on:
   pull_request:
+    paths:
+      - 'depend.txt'
+      - '.github/workflows/cfm/**'
+      - 'Dockerfile'
+      - 'src/**'
   workflow_dispatch:
+    inputs:
+      compare_to:
+        description: Base branch used to detect changes for manual runs
+        required: true
+        default: main
+        type: string
 
 permissions:
   contents: read
@@ -11,42 +22,82 @@ permissions:
 
 jobs:
   run-resources-in-order:
-    name: Run resource workflows in depend.txt order
+    name: Detect and run changed resources
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out repository history
         uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
 
-      - name: Dispatch and wait for each resource workflow
+      - name: Create ordered resource plan
+        id: plan
         env:
-          GH_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          COMPARE_TO: ${{ inputs.compare_to }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ ! -f depend.txt ]]; then
-            echo "depend.txt was not found at the repository root." >&2
-            exit 1
-          fi
-
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base_sha="$PR_BASE_SHA"
+            head_sha="$PR_HEAD_SHA"
             target_ref="$GITHUB_BASE_REF"
           else
+            if [[ -z "$COMPARE_TO" ]]; then
+              echo "Set compare_to to the branch to compare against." >&2
+              exit 1
+            fi
+            git fetch --no-tags origin "$COMPARE_TO"
+            base_sha=$(git merge-base FETCH_HEAD "$GITHUB_SHA")
+            head_sha="$GITHUB_SHA"
             target_ref="$GITHUB_REF_NAME"
           fi
 
+          git diff --name-only "$base_sha" "$head_sha" > "$RUNNER_TEMP/changed-files.txt"
+          python .github/scripts/create-resource-plan.py \
+            --manifest depend.txt \
+            --changed-files "$RUNNER_TEMP/changed-files.txt" \
+            --output "$RUNNER_TEMP/resource-plan.json"
+
+          plan_file="$RUNNER_TEMP/resource-plan.json"
+          has_changes=$(jq -r '(.execution_order | length) > 0' "$plan_file")
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+          echo "target_ref=$target_ref" >> "$GITHUB_OUTPUT"
+          echo "plan_file=$plan_file" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Resource execution plan"
+            echo
+            echo "Changed paths:"
+            if [[ -s "$RUNNER_TEMP/changed-files.txt" ]]; then
+              sed 's/^/- /' "$RUNNER_TEMP/changed-files.txt"
+            else
+              echo "- (none)"
+            fi
+            echo
+            echo "Services selected in order:"
+            if [[ "$has_changes" == "true" ]]; then
+              jq -r '.execution_order[] | "- " + .' "$plan_file"
+            else
+              echo "- None; no resource child workflows will be started."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch each selected child workflow and wait
+        if: steps.plan.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REF: ${{ steps.plan.outputs.target_ref }}
+          PLAN_FILE: ${{ steps.plan.outputs.plan_file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t services < <(jq -r '.execution_order[]' "$PLAN_FILE")
           index=0
-          while IFS= read -r service || [[ -n "$service" ]]; do
-            service="$(printf '%s' "$service" | tr -d '\r')"
-            if [[ -z "$service" ]]; then
-              continue
-            fi
-
-            if [[ ! "$service" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]]; then
-              echo "Invalid service name in depend.txt: $service" >&2
-              exit 1
-            fi
-
+          for service in "${services[@]}"; do
             service_key=$(printf '%s' "$service" | tr '[:upper:]' '[:lower:]')
             service_display=$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')
             workflow_file="resource-$service_key.yml"
@@ -62,14 +113,14 @@ jobs:
 
             echo "Dispatching $workflow_file for $service (request $request_id)"
             gh workflow run "$workflow_file" \
-              --ref "$target_ref" \
+              --ref "$TARGET_REF" \
               --field "request_id=$request_id"
 
             child_run_id=""
             for attempt in {1..30}; do
               child_run_id=$(gh run list \
                 --workflow "$workflow_file" \
-                --branch "$target_ref" \
+                --branch "$TARGET_REF" \
                 --event workflow_dispatch \
                 --limit 50 \
                 --json databaseId,displayTitle \
@@ -88,4 +139,4 @@ jobs:
             fi
 
             gh run watch "$child_run_id" --exit-status --interval 2
-          done < depend.txt
+          done
