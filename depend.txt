@@ -1,0 +1,4 @@
+VPC
+S3
+EC2
+ECS

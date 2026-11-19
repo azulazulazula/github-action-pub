@@ -1,0 +1,32 @@
+name: Echo AWS service list
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  echo-services:
+    name: Echo services from depend.txt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Echo each service in order
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f depend.txt ]]; then
+            echo "depend.txt was not found at the repository root." >&2
+            exit 1
+          fi
+
+          while IFS= read -r service || [[ -n "$service" ]]; do
+            service="${service%$'\r'}"
+            if [[ -n "$service" ]]; then
+              echo "$service"
+            fi
+          done < depend.txt
