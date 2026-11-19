@@ -39,16 +39,11 @@ ECS | .github/workflows/cfm/ecs/**,Dockerfile,src/** | VPC
 
 ## 子ワークフローとの対応
 
-サービス名を小文字にした名前で、`.github/workflows/resource-<サービス名>.yml` を用意します。
+サービスごとに子ワークフローを作る必要はありません。親は実行計画に含まれるサービス名を入力値として渡し、共通の `.github/workflows/childresource.yaml` を1サービスずつ順番に起動します。
 
-| depend.txtのサービス名 | 子ワークフロー |
-| --- | --- |
-| `VPC` | `.github/workflows/resource-vpc.yml` |
-| `S3` | `.github/workflows/resource-s3.yml` |
-| `EC2` | `.github/workflows/resource-ec2.yml` |
-| `ECS` | `.github/workflows/resource-ecs.yml` |
+たとえば `VPC` と `ECS` が実行対象なら、親は共通ワークフローを2回起動し、それぞれ `service_name=VPC`、`service_name=ECS` を渡します。子ワークフローは受け取ったサービス名を使って処理します。現在はサービス名を表示するだけで、CloudFormationやAWSリソースの操作は行いません。
 
-子ワークフローは親から呼ばれたサービスの処理を担当します。現在の子ワークフローはサービス名を表示するだけで、CloudFormationやAWSリソースの操作は行いません。
+`workflow_dispatch` で起動するため、共通子ワークフローはGitHub Actionsが認識する `.github/workflows/` 直下に置き、既定ブランチに存在させます。
 
 ## サービスを追加するとき
 
