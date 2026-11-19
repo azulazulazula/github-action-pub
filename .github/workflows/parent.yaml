@@ -37,7 +37,7 @@ jobs:
 
           index=0
           while IFS= read -r service || [[ -n "$service" ]]; do
-            service="${service%$'\\r'}"
+            service="${service%$'\r'}"
             if [[ -z "$service" ]]; then
               continue
             fi
@@ -58,7 +58,7 @@ jobs:
 
             index=$((index + 1))
             request_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${index}"
-            expected_title="Echo $service_display request $request_id"
+            expected_title="Echo $service_display from parent $request_id"
 
             echo "Dispatching $workflow_file for $service (request $request_id)"
             gh workflow run "$workflow_file" \
