@@ -1,3 +1,5 @@
+# 保管用: 現在は無効です。
+# このファイルを .github/workflows/ 配下へ戻すと、mainへのpushでAWSデプロイが再開します。
 name: Orchestrate AWS resource deployments
 
 on:
