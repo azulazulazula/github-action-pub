@@ -2,10 +2,10 @@ name: Parent resource workflow
 run-name: Parent resource workflow request ${{ github.run_id }}-${{ github.run_attempt }}
 
 on:
-  # main宛てのPRで起動し、変更対象の判定はdepend.txtに集約します。
-  pull_request:
-    branches:
-      - main
+  # main宛てPRのレビュー承認で起動します。変更対象の判定はdepend.txtに集約します。
+  pull_request_review:
+    types:
+      - submitted
   workflow_dispatch:
     inputs:
       compare_to:
@@ -20,6 +20,7 @@ permissions:
 
 jobs:
   run-resources-in-order:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && github.event.pull_request.base.ref == 'main')
     name: Detect and run changed resources
     runs-on: ubuntu-latest
     steps:
@@ -33,15 +34,16 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           COMPARE_TO: ${{ inputs.compare_to }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_review" ]]; then
             base_sha="$PR_BASE_SHA"
             head_sha="$PR_HEAD_SHA"
-            target_ref="$GITHUB_BASE_REF"
+            target_ref="$PR_BASE_REF"
           else
             if [[ -z "$COMPARE_TO" ]]; then
               echo "Set compare_to to the branch to compare against." >&2
