@@ -1,4 +1,5 @@
-VPC
-S3
-EC2
-ECS
+# SERVICE | WATCH_PATHS | DEPENDS_ON
+VPC | .github/workflows/cfm/vpc/** | -
+S3 | .github/workflows/cfm/s3/** | -
+EC2 | .github/workflows/cfm/ec2.yml | VPC
+ECS | .github/workflows/cfm/ecs/**,Dockerfile,src/** | VPC
