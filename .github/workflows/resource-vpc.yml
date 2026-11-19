@@ -3,12 +3,12 @@ name: Echo VPC resource
 on:
   workflow_dispatch:
     inputs:
-      parent_run_id:
-        description: Parent workflow run identifier
+      request_id:
+        description: Unique parent request identifier
         required: true
         type: string
 
-run-name: Echo VPC from parent ${{ inputs.parent_run_id }}
+run-name: Echo VPC from parent ${{ inputs.request_id }}
 
 permissions:
   contents: read
