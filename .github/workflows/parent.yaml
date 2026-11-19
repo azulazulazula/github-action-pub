@@ -2,12 +2,12 @@ name: Parent resource workflow
 run-name: Parent resource workflow request ${{ github.run_id }}-${{ github.run_attempt }}
 
 on:
-  pull_request:
-    paths:
-      - 'depend.txt'
-      - '.github/workflows/cfm/**'
-      - 'Dockerfile'
-      - 'src/**'
+  # pull_request:
+  #   paths:
+  #     - 'depend.txt'
+  #     - '.github/workflows/cfm/**'
+  #     - 'Dockerfile'
+  #     - 'src/**'
   workflow_dispatch:
     inputs:
       compare_to:
