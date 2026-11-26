@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   plan-and-dispatch:
-    if: github.event_name == 'pull_request' || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && github.event.pull_request.base.ref == 'main')
+    if: github.event_name == 'pull_request' || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && github.event.review.commit_id == github.event.pull_request.head.sha && github.event.pull_request.base.ref == 'main')
     name: 差分を計画し、共通子ワークフローを順次実行
     runs-on: ubuntu-latest
     steps:
@@ -69,6 +69,8 @@ jobs:
           plan_file="$RUNNER_TEMP/resource-plan.json"
           has_changes=$(jq -r '(.execution_order | length) > 0' "$plan_file")
           echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+          changed_services=$(jq -r '.changed_services | join(",")' "$plan_file")
+          echo "changed_services=$changed_services" >> "$GITHUB_OUTPUT"
           echo "phase=$phase" >> "$GITHUB_OUTPUT"
           echo "phase_label=$phase_label" >> "$GITHUB_OUTPUT"
           echo "target_ref=$target_ref" >> "$GITHUB_OUTPUT"
@@ -101,6 +103,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_REF: ${{ steps.plan.outputs.target_ref }}
           PLAN_FILE: ${{ steps.plan.outputs.plan_file }}
+          CHANGED_SERVICES: ${{ steps.plan.outputs.changed_services }}
           PHASE: ${{ steps.plan.outputs.phase }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
@@ -121,7 +124,7 @@ jobs:
 
             index=$((index + 1))
             request_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$index"
-            expected_title="Echo $service_display from parent $request_id"
+            expected_title="Resource $service_display $PHASE request $request_id"
 
             echo "共通子ワークフローを起動します: $service_display ($PHASE)"
             gh workflow run "$workflow_file" \
@@ -130,7 +133,8 @@ jobs:
               --field "request_id=$request_id" \
               --field "phase=$PHASE" \
               --field "pull_request_number=$PR_NUMBER" \
-              --field "source_sha=$SOURCE_SHA"
+              --field "source_sha=$SOURCE_SHA" \
+              --field "changed_services=$CHANGED_SERVICES"
 
             # 起動直後は実行一覧への反映に時間がかかることがあるため、最大約1分間ポーリングして実行IDを取得します。
             child_run_id=""
