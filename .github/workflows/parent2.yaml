@@ -42,6 +42,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          # PRブランチのマニフェストはデータとして読むだけにし、計画生成コードはベース側の信頼できる版を使います。
+          git fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
+          git show "$PR_HEAD_SHA:depend.txt" > "$RUNNER_TEMP/depend.txt"
+
           # PR作成・更新とPR承認は別々のイベント実行です。
           # どちらも同じPRのベースSHAとヘッドSHAから同じ対象サービスを計画します。
           base_sha="$PR_BASE_SHA"
@@ -58,7 +62,7 @@ jobs:
 
           git diff --name-only "$base_sha" "$head_sha" > "$RUNNER_TEMP/changed-files.txt"
           python .github/scripts/create-resource-plan.py \
-            --manifest depend.txt \
+            --manifest "$RUNNER_TEMP/depend.txt" \
             --changed-files "$RUNNER_TEMP/changed-files.txt" \
             --output "$RUNNER_TEMP/resource-plan.json"
 
