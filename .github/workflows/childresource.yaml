@@ -1,74 +1,154 @@
 name: Child resource workflow
+run-name: Resource ${{ inputs.service_name }} ${{ inputs.phase }} request ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
     inputs:
       service_name:
-        description: 実行対象のサービス名
+        description: 実行対象
         required: true
         type: string
       request_id:
-        description: 親ワークフローのリクエストID
+        description: 親リクエストID
         required: true
         type: string
       phase:
-        description: 実行段階（prepare / apply / echo）
+        description: prepare / apply / echo
         required: false
         default: echo
         type: string
       pull_request_number:
-        description: 対象プルリクエスト番号
+        description: PR番号
         required: false
         type: string
       source_sha:
-        description: 対象プルリクエストのコミットSHA
+        description: PRコミットSHA
+        required: false
+        type: string
+      changed_services:
+        description: PRで直接変更されたサービス（カンマ区切り）
         required: false
         type: string
 
-run-name: Echo ${{ inputs.service_name }} from parent ${{ inputs.request_id }}
-
 permissions:
   contents: read
+  id-token: write
+  pull-requests: read
 
 jobs:
   echo-service:
+    if: inputs.phase == 'echo' || inputs.service_name != 'EC2'
     runs-on: ubuntu-latest
     steps:
-      - name: サービス名と想定処理を表示
+      - name: サービス名または未実装範囲を表示
         env:
-          SERVICE_NAME: ${{ inputs.service_name }}
+          SERVICE: ${{ inputs.service_name }}
           PHASE: ${{ inputs.phase }}
-          PR_NUMBER: ${{ inputs.pull_request_number }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          if [[ "$PHASE" == echo ]]; then echo "$SERVICE"
+          else echo "$SERVICE のAWS変更は未実装です。現段階でChange Setに対応するのはEC2のみです。"; fi
+
+  ec2-change-set:
+    if: inputs.service_name == 'EC2' && (inputs.phase == 'prepare' || inputs.phase == 'apply')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
+          aws-region: ap-south-1
+          allowed-account-ids: "798452926315"
+
+      - name: PRコミットとテンプレートを確認
+        id: source
+        env:
+          PR: ${{ inputs.pull_request_number }}
+          SHA: ${{ inputs.source_sha }}
+          CHANGED: ${{ inputs.changed_services }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$PR" =~ ^[0-9]+$ && "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "PR番号またはSHAが不正です" >&2; exit 1; }
+          case ",$CHANGED," in *,VPC,*) echo "VPCとEC2の同時変更は、VPC適用後のEC2再計画が未実装のため停止します。" >&2; exit 1 ;; esac
+          git fetch --no-tags origin "refs/pull/$PR/head"
+          [[ "$(git rev-parse FETCH_HEAD)" == "$SHA" ]] || { echo "PRのコミットが変わっています。古いChange Setは扱いません。" >&2; exit 1; }
+          git show "$SHA:.github/workflows/cfm/ec2.yml" > "$RUNNER_TEMP/ec2.yml"
+          aws cloudformation validate-template --template-body "file://$RUNNER_TEMP/ec2.yml" >/dev/null
+          short=$(printf '%s' "$SHA" | cut -c1-12)
+          echo "stack=eiei-mun-ec2-prototype" >> "$GITHUB_OUTPUT"
+          echo "cs=pr-$PR-$short-ec2" >> "$GITHUB_OUTPUT"
 
-          echo "対象サービス: $SERVICE_NAME"
-          echo "対象PR: ${PR_NUMBER:-未指定}"
-          echo "対象コミット: ${SOURCE_SHA:-未指定}"
+      - name: 承認前にChange Setを作成し変更内容を表示
+        if: inputs.phase == 'prepare'
+        env:
+          PR: ${{ inputs.pull_request_number }}
+          SHA: ${{ inputs.source_sha }}
+          STACK: ${{ steps.source.outputs.stack }}
+          CS: ${{ steps.source.outputs.cs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          vpc=$(aws cloudformation describe-stacks --stack-name eiei-mun-vpc-prototype --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue | [0]" --output text)
+          subnet=$(aws cloudformation describe-stacks --stack-name eiei-mun-vpc-prototype --query "Stacks[0].Outputs[?OutputKey=='PublicSubnetId'].OutputValue | [0]" --output text)
+          ami=$(aws ec2 describe-images --owners amazon --filters Name=name,Values='al2023-ami-2023.*-kernel-*-arm64' Name=architecture,Values=arm64 Name=state,Values=available --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text)
+          [[ "$vpc" != None && "$subnet" != None && "$ami" != None ]] || { echo "VPC出力またはAL2023 ARM64 AMIがありません" >&2; exit 1; }
+          state=$(aws cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)
+          if [[ -z "$state" || "$state" == None ]]; then kind=CREATE
+          else case "$state" in CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE) kind=UPDATE ;; *) echo "EC2スタック状態が不正です: $state" >&2; exit 1 ;; esac; fi
+          old=$(aws cloudformation describe-change-set --stack-name "$STACK" --change-set-name "$CS" --query Status --output text 2>/dev/null || true)
+          if [[ -z "$old" || "$old" == None ]]; then
+            aws cloudformation create-change-set --stack-name "$STACK" --change-set-name "$CS" --change-set-type "$kind" --template-body "file://$RUNNER_TEMP/ec2.yml" --parameters "ParameterKey=AmiId,ParameterValue=$ami" "ParameterKey=VpcId,ParameterValue=$vpc" "ParameterKey=SubnetId,ParameterValue=$subnet" --description "PR #$PR source $SHA" --tags "Key=PullRequest,Value=$PR" "Key=SourceRevision,Value=$SHA" "Key=Service,Value=EC2" >/dev/null
+          fi
+          for n in {1..60}; do
+            d=$(aws cloudformation describe-change-set --stack-name "$STACK" --change-set-name "$CS" --output json)
+            status=$(jq -r '.Status' <<<"$d"); reason=$(jq -r '.StatusReason // ""' <<<"$d")
+            [[ "$status" == CREATE_COMPLETE || "$status" == FAILED ]] && break
+            sleep 2
+          done
+          if [[ "$status" == FAILED ]]; then
+            if grep -Eqi "did(n't| not) contain changes|no updates are to be performed" <<<"$reason"; then echo "変更なし。承認後の実行をスキップします。" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+            echo "Change Set失敗: $reason" >&2; exit 1
+          fi
+          [[ "$status" == CREATE_COMPLETE ]] || { echo "Change Set未完了: $status" >&2; exit 1; }
+          {
+            echo "## 承認前のEC2 Change Set"
+            echo "- PR #$PR / コミット $SHA / Change Set $CS"
+            echo "- 変更内容:"
+            jq -r '.Changes[]?.ResourceChange | "- \(.Action) \(.LogicalResourceId) (\(.ResourceType), replacement: \(.Replacement // "不明"))"' <<<"$d"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          case "$PHASE" in
-            prepare)
-              echo "【承認前の事前処理で今後行う想定】"
-              echo "AWSへ接続し、対象サービスのCloudFormationテンプレートからChange Setを作成します。"
-              echo "Change Setの状態と変更一覧を確認します。"
-              echo "変更ありの場合: Change Setと対象コミットをPRに紐付け、変更内容を提示して承認を待ちます。この段階では実行しません。"
-              echo "変更なしの場合: デプロイ不要として記録し、承認後もChange Setを実行しません。"
-              echo "Change Setの作成・確認でエラーの場合: 事前処理を失敗として記録します。必須チェックに設定されていればマージを止めます。"
-              ;;
-            apply)
-              echo "【承認後の後処理で今後行う想定】"
-              echo "承認されたPR番号とコミットSHAに紐付くChange Setを確認します。"
-              echo "有効なChange Setに変更がある場合: 対象コミットが承認時のものと一致することを確認して、そのChange Setを実行します。"
-              echo "事前処理で変更なしと記録されている場合: AWS変更を行わず、処理を正常終了します。"
-              echo "Change Setがない、期限切れ、または対象コミットが一致しない場合: 誤デプロイを防ぐため実行せず、失敗として終了します。"
-              ;;
-            echo)
-              echo "$SERVICE_NAME"
-              ;;
-            *)
-              echo "未対応の実行段階です: $PHASE" >&2
-              exit 1
-              ;;
-          esac
+      - name: 承認後に同一Change Setを実行
+        if: inputs.phase == 'apply'
+        env:
+          PR: ${{ inputs.pull_request_number }}
+          SHA: ${{ inputs.source_sha }}
+          STACK: ${{ steps.source.outputs.stack }}
+          CS: ${{ steps.source.outputs.cs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          d=$(aws cloudformation describe-change-set --stack-name "$STACK" --change-set-name "$CS" --output json) || { echo "事前Change Setがありません" >&2; exit 1; }
+          desc=$(jq -r '.Description // ""' <<<"$d")
+          [[ "$desc" == *"PR #$PR source $SHA"* ]] || { echo "PR番号またはSHA不一致のため停止します" >&2; exit 1; }
+          status=$(jq -r '.Status' <<<"$d"); reason=$(jq -r '.StatusReason // ""' <<<"$d")
+          if [[ "$status" == FAILED ]] && grep -Eqi "did(n't| not) contain changes|no updates are to be performed" <<<"$reason"; then echo "変更なしのため実行をスキップしました" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          [[ "$status" == CREATE_COMPLETE ]] || { echo "実行不可: $status $reason" >&2; exit 1; }
+          aws cloudformation execute-change-set --stack-name "$STACK" --change-set-name "$CS"
+          final=""
+          for n in {1..180}; do
+            final=$(aws cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)
+            case "$final" in
+              CREATE_COMPLETE|UPDATE_COMPLETE) break ;;
+              CREATE_FAILED|ROLLBACK_COMPLETE|ROLLBACK_FAILED|UPDATE_ROLLBACK_COMPLETE|UPDATE_ROLLBACK_FAILED|UPDATE_FAILED|DELETE_COMPLETE)
+                aws cloudformation describe-stack-events --stack-name "$STACK" --query 'StackEvents[0:10].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' --output table || true
+                echo "CloudFormation失敗: $final" >&2; exit 1 ;;
+            esac
+            sleep 10
+          done
+          [[ "$final" == CREATE_COMPLETE || "$final" == UPDATE_COMPLETE ]] || { echo "完了待ちタイムアウト: $final" >&2; exit 1; }
+          id=$(aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue | [0]" --output text)
+          ip=$(aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='PublicIp'].OutputValue | [0]" --output text)
+          echo "デプロイ完了: $final / InstanceId=$id / Public IP=$ip" >> "$GITHUB_STEP_SUMMARY"
