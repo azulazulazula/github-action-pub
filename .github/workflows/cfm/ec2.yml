@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Prototype EC2 instance in the dedicated prototype VPC
+Description: Prototype EC2 instance for the approval-gated deployment prototype
 # Test trigger: validate EC2 deployment with its VPC prerequisite.
 
 Metadata:
