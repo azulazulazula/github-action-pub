@@ -116,6 +116,7 @@ jobs:
               --field "service_name=$service_display" \
               --field "request_id=$request_id"
 
+            # 起動直後は実行一覧への反映に時間がかかることがあるため、最大30回（約1分）ポーリングして実行IDを取得します。
             child_run_id=""
             for attempt in {1..30}; do
               child_run_id=$(gh run list \
