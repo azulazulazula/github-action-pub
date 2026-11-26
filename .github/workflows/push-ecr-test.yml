@@ -12,22 +12,25 @@ jobs:
     timeout-minutes: 10
     environment: prod
     permissions:
+      contents: read
       id-token: write
     env:
       AWS_REGION: ap-southeast-2
       ECR_REGISTRY: 798452926315.dkr.ecr.ap-southeast-2.amazonaws.com
       ECR_REPOSITORY: testnamespace/mytest1
     steps:
+      - name: Check out Dockerfile and build context
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Build test image
         shell: bash
         run: |
           set -euo pipefail
-          context=$(mktemp -d)
-          printf 'GitHub Actions run %s attempt %s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$context/message.txt"
-          printf 'FROM scratch\nCOPY message.txt /message.txt\n' > "$context/Dockerfile"
           tag="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           image="$ECR_REGISTRY/$ECR_REPOSITORY:$tag"
-          docker build --tag "$image" "$context"
+          docker build --tag "$image" docker/ecr-test
           printf 'IMAGE_TAG=%s\nIMAGE_URI=%s\n' "$tag" "$image" >> "$GITHUB_ENV"
 
       - name: Assume AWS role
