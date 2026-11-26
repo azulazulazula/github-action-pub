@@ -1,0 +1,52 @@
+name: Push test image to Amazon ECR
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  push:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: prod
+    permissions:
+      id-token: write
+    env:
+      AWS_REGION: ap-southeast-2
+      ECR_REGISTRY: 798452926315.dkr.ecr.ap-southeast-2.amazonaws.com
+      ECR_REPOSITORY: testnamespace/mytest1
+    steps:
+      - name: Build test image
+        shell: bash
+        run: |
+          set -euo pipefail
+          context=$(mktemp -d)
+          printf 'GitHub Actions run %s attempt %s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$context/message.txt"
+          printf 'FROM scratch\nCOPY message.txt /message.txt\n' > "$context/Dockerfile"
+          tag="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image="$ECR_REGISTRY/$ECR_REPOSITORY:$tag"
+          docker build --tag "$image" "$context"
+          printf 'IMAGE_TAG=%s\nIMAGE_URI=%s\n' "$tag" "$image" >> "$GITHUB_ENV"
+
+      - name: Assume AWS role
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::798452926315:role/ra-men-role
+          aws-region: ap-southeast-2
+          allowed-account-ids: "798452926315"
+
+      - name: Push and verify in ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          trap 'docker logout "$ECR_REGISTRY"' EXIT
+          docker push "$IMAGE_URI"
+          digest=$(aws ecr batch-get-image --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" \
+            --query 'images[0].imageId.imageDigest' --output text)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'Image: `%s`\n\nDigest: `%s`\n' "$IMAGE_URI" "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
