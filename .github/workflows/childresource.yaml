@@ -11,6 +11,19 @@ on:
         description: 親ワークフローのリクエストID
         required: true
         type: string
+      phase:
+        description: 実行段階（prepare / apply / echo）
+        required: false
+        default: echo
+        type: string
+      pull_request_number:
+        description: 対象プルリクエスト番号
+        required: false
+        type: string
+      source_sha:
+        description: 対象プルリクエストのコミットSHA
+        required: false
+        type: string
 
 run-name: Echo ${{ inputs.service_name }} from parent ${{ inputs.request_id }}
 
@@ -21,7 +34,41 @@ jobs:
   echo-service:
     runs-on: ubuntu-latest
     steps:
-      - name: サービス名を表示
+      - name: サービス名と想定処理を表示
         env:
           SERVICE_NAME: ${{ inputs.service_name }}
-        run: echo "$SERVICE_NAME"
+          PHASE: ${{ inputs.phase }}
+          PR_NUMBER: ${{ inputs.pull_request_number }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "対象サービス: $SERVICE_NAME"
+          echo "対象PR: ${PR_NUMBER:-未指定}"
+          echo "対象コミット: ${SOURCE_SHA:-未指定}"
+
+          case "$PHASE" in
+            prepare)
+              echo "【承認前の事前処理で今後行う想定】"
+              echo "AWSへ接続し、対象サービスのCloudFormationテンプレートからChange Setを作成します。"
+              echo "Change Setの状態と変更一覧を確認します。"
+              echo "変更ありの場合: Change Setと対象コミットをPRに紐付け、変更内容を提示して承認を待ちます。この段階では実行しません。"
+              echo "変更なしの場合: デプロイ不要として記録し、承認後もChange Setを実行しません。"
+              echo "Change Setの作成・確認でエラーの場合: 事前処理を失敗として終了し、承認後の処理には進みません。"
+              ;;
+            apply)
+              echo "【承認後の後処理で今後行う想定】"
+              echo "承認されたPR番号とコミットSHAに紐付くChange Setを確認します。"
+              echo "有効なChange Setに変更がある場合: 対象コミットが承認時のものと一致することを確認して、そのChange Setを実行します。"
+              echo "事前処理で変更なしと記録されている場合: AWS変更を行わず、処理を正常終了します。"
+              echo "Change Setがない、期限切れ、または対象コミットが一致しない場合: 誤デプロイを防ぐため実行せず、失敗として終了します。"
+              ;;
+            echo)
+              echo "$SERVICE_NAME"
+              ;;
+            *)
+              echo "未対応の実行段階です: $PHASE" >&2
+              exit 1
+              ;;
+          esac
