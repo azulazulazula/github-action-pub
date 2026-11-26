@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1280" viewBox="0 0 1600 1280" role="img" aria-labelledby="title desc">
+<title id="title">EC2 Change Set approval flow</title>
+<desc id="desc">Comparison of EC2-only changes and combined VPC and EC2 changes, showing change set creation before approval and execution after approval.</desc>
+<defs>
+  <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+    <path d="M1,1 L11,6 L1,11 Z" fill="#5b7182"/>
+  </marker>
+  <style>
+    text { font-family: "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif; fill: #17324a; }
+    .title { font-size: 34px; font-weight: 700; }
+    .subtitle { font-size: 18px; fill: #52697a; }
+    .lane-title { font-size: 24px; font-weight: 700; }
+    .step-title { font-size: 20px; font-weight: 700; }
+    .step-text { font-size: 16px; }
+    .small { font-size: 14px; fill: #435b6d; }
+    .pill { font-size: 14px; font-weight: 700; }
+    .card { fill: #ffffff; stroke: #b9cbd6; stroke-width: 2; }
+    .pre { fill: #e9f4fb; stroke: #4c96bd; stroke-width: 2; }
+    .approval { fill: #fff3d8; stroke: #d4a345; stroke-width: 2; }
+    .execute { fill: #e8f5eb; stroke: #5a9a6a; stroke-width: 2; }
+    .defer { fill: #f1edfb; stroke: #8c75bb; stroke-width: 2; }
+    .arrow { fill: none; stroke: #5b7182; stroke-width: 3; marker-end: url(#arrow); }
+  </style>
+</defs>
+<rect width="1600" height="1280" fill="#f5f8fa"/>
+<text x="800" y="52" text-anchor="middle" class="title">CloudFormation Change Set の作成・承認・実行</text>
+<text x="800" y="84" text-anchor="middle" class="subtitle">EC2だけを変更する場合と、VPC・EC2を同じPRで変更する場合</text>
+
+<rect x="45" y="120" width="735" height="1115" rx="22" fill="#edf5f9" stroke="#c7d9e3" stroke-width="2"/>
+<rect x="820" y="120" width="735" height="1115" rx="22" fill="#f1f3f8" stroke="#cfd4e2" stroke-width="2"/>
+<text x="412" y="160" text-anchor="middle" class="lane-title">EC2だけを変更</text>
+<text x="1187" y="160" text-anchor="middle" class="lane-title">VPCとEC2を同じPRで変更</text>
+
+<!-- EC2-only flow -->
+<rect x="165" y="190" width="495" height="72" rx="14" class="card"/>
+<text x="412" y="235" text-anchor="middle" class="step-title">PR作成・更新</text>
+<path d="M412 263 L412 296" class="arrow"/>
+
+<rect x="125" y="305" width="575" height="140" rx="14" class="pre"/>
+<text x="412" y="338" text-anchor="middle" class="step-title">承認前：EC2 Change Setを作成</text>
+<text x="155" y="371" class="step-text">現在のVPCスタックから VpcId / SubnetId を取得</text>
+<text x="155" y="398" class="step-text">AMIなどの入力値をそろえ、EC2の変更内容を確認</text>
+<text x="155" y="425" class="small">変更なしならデプロイ不要。作成エラーなら失敗として記録。</text>
+<path d="M412 446 L412 480" class="arrow"/>
+
+<rect x="205" y="490" width="415" height="72" rx="14" class="approval"/>
+<text x="412" y="535" text-anchor="middle" class="step-title">PR承認</text>
+<path d="M412 563 L412 596" class="arrow"/>
+
+<rect x="165" y="605" width="495" height="82" rx="14" class="execute"/>
+<text x="412" y="640" text-anchor="middle" class="step-title">承認後：確認済みChange Setを実行</text>
+<text x="412" y="667" text-anchor="middle" class="small">別のChange Setを選ばず、作成済みのものを指定</text>
+<path d="M412 688 L412 720" class="arrow"/>
+
+<rect x="205" y="730" width="415" height="72" rx="14" class="card"/>
+<text x="412" y="775" text-anchor="middle" class="step-title">EC2スタックの完了を待つ</text>
+<path d="M412 803 L412 836" class="arrow"/>
+
+<rect x="165" y="846" width="495" height="92" rx="14" class="execute"/>
+<text x="412" y="882" text-anchor="middle" class="step-title">InstanceId・PublicIpを記録</text>
+<text x="412" y="910" text-anchor="middle" class="small">ここまで完了してEC2作成処理が終了</text>
+
+<rect x="125" y="985" width="575" height="155" rx="14" fill="#ffffff" stroke="#c7d9e3" stroke-width="2"/>
+<text x="155" y="1020" class="step-title">この経路で使う値</text>
+<text x="155" y="1054" class="step-text">• 既存VPCの出力：VpcId、PublicSubnetId</text>
+<text x="155" y="1084" class="step-text">• EC2テンプレートの入力：AMI、VPC、Subnet</text>
+<text x="155" y="1114" class="small">承認前にEC2 Change Setの内容を確認できます。</text>
+
+<!-- VPC + EC2 flow -->
+<rect x="940" y="190" width="495" height="72" rx="14" class="card"/>
+<text x="1187" y="235" text-anchor="middle" class="step-title">PR作成・更新</text>
+<path d="M1187 263 L1187 296" class="arrow"/>
+
+<rect x="900" y="305" width="575" height="112" rx="14" class="pre"/>
+<text x="1187" y="341" text-anchor="middle" class="step-title">承認前：VPC Change Setを作成・確認</text>
+<text x="930" y="376" class="step-text">EC2 Change Setはまだ作らない</text>
+<text x="930" y="400" class="small">実行前のVPC出力をEC2に渡すと、古いIDになる可能性</text>
+<path d="M1187 418 L1187 446" class="arrow"/>
+
+<rect x="980" y="456" width="415" height="68" rx="14" class="approval"/>
+<text x="1187" y="499" text-anchor="middle" class="step-title">PR承認</text>
+<path d="M1187 525 L1187 552" class="arrow"/>
+
+<rect x="970" y="562" width="435" height="72" rx="14" class="execute"/>
+<text x="1187" y="607" text-anchor="middle" class="step-title">VPC Change Setを実行</text>
+<path d="M1187 635 L1187 662" class="arrow"/>
+
+<rect x="980" y="672" width="415" height="68" rx="14" class="card"/>
+<text x="1187" y="715" text-anchor="middle" class="step-title">VPCスタック完了を待つ</text>
+<path d="M1187 741 L1187 768" class="arrow"/>
+
+<rect x="940" y="778" width="495" height="80" rx="14" class="pre"/>
+<text x="1187" y="812" text-anchor="middle" class="step-title">新しい VpcId / SubnetId を取得</text>
+<text x="1187" y="840" text-anchor="middle" class="small">更新後のCloudFormation Outputsを使用</text>
+<path d="M1187 859 L1187 884" class="arrow"/>
+
+<rect x="900" y="894" width="575" height="102" rx="14" class="pre"/>
+<text x="1187" y="930" text-anchor="middle" class="step-title">新しい出力でEC2 Change Setを作成・確認</text>
+<text x="930" y="965" class="small">このChange Setは最初のPR承認後に作成される</text>
+<path d="M1187 997 L1187 1024" class="arrow"/>
+
+<rect x="950" y="1034" width="475" height="70" rx="14" class="defer"/>
+<text x="1187" y="1078" text-anchor="middle" class="step-title">EC2変更を人が確認する？</text>
+<path d="M1105 1105 L1050 1140" class="arrow"/>
+<path d="M1270 1105 L1325 1140" class="arrow"/>
+
+<rect x="865" y="1150" width="340" height="62" rx="12" class="approval"/>
+<text x="1035" y="1177" text-anchor="middle" class="pill">確認する：追加承認してから実行</text>
+<text x="1035" y="1198" text-anchor="middle" class="small">EC2 Change Setを見て承認</text>
+
+<rect x="1220" y="1150" width="300" height="62" rx="12" class="execute"/>
+<text x="1370" y="1177" text-anchor="middle" class="pill">確認しない：自動実行</text>
+<text x="1370" y="1198" text-anchor="middle" class="small">追加承認なしで実行</text>
+</svg>
