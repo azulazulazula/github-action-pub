@@ -51,6 +51,7 @@ jobs:
   ec2-change-set:
     if: inputs.service_name == 'EC2' && (inputs.phase == 'prepare' || inputs.phase == 'apply')
     runs-on: ubuntu-latest
+    environment: prod
     steps:
       - uses: actions/checkout@v7.0.1
         with:
