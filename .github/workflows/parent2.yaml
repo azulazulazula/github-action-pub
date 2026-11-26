@@ -25,9 +25,10 @@ jobs:
     name: 差分を計画し、共通子ワークフローを順次実行
     runs-on: ubuntu-latest
     steps:
-      - name: リポジトリをチェックアウト
+      - name: PRベース側の信頼できる定義をチェックアウト
         uses: actions/checkout@v7.0.1
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
 
       - name: 実行対象を計画
