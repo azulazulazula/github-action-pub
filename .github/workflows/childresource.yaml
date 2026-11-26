@@ -1,5 +1,5 @@
 name: Child resource workflow
-run-name: Resource ${ inputs.service_name }} ${ inputs.phase }} request ${ inputs.request_id }}
+run-name: Resource ${{ inputs.service_name }} ${{ inputs.phase }} request ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -42,8 +42,8 @@ jobs:
     steps:
       - name: サービス名または未実装範囲を表示
         env:
-          SERVICE: ${ inputs.service_name }}
-          PHASE: ${ inputs.phase }}
+          SERVICE: ${{ inputs.service_name }}
+          PHASE: ${{ inputs.phase }}
         run: |
           if [[ "$PHASE" == echo ]]; then echo "$SERVICE"
           else echo "$SERVICE のAWS変更は未実装です。現段階でChange Setに対応するのはEC2のみです。"; fi
@@ -65,9 +65,9 @@ jobs:
       - name: PRコミットとテンプレートを確認
         id: source
         env:
-          PR: ${ inputs.pull_request_number }}
-          SHA: ${ inputs.source_sha }}
-          CHANGED: ${ inputs.changed_services }}
+          PR: ${{ inputs.pull_request_number }}
+          SHA: ${{ inputs.source_sha }}
+          CHANGED: ${{ inputs.changed_services }}
         shell: bash
         run: |
           set -euo pipefail
@@ -84,10 +84,10 @@ jobs:
       - name: 承認前にChange Setを作成し変更内容を表示
         if: inputs.phase == 'prepare'
         env:
-          PR: ${ inputs.pull_request_number }}
-          SHA: ${ inputs.source_sha }}
-          STACK: ${ steps.source.outputs.stack }}
-          CS: ${ steps.source.outputs.cs }}
+          PR: ${{ inputs.pull_request_number }}
+          SHA: ${{ inputs.source_sha }}
+          STACK: ${{ steps.source.outputs.stack }}
+          CS: ${{ steps.source.outputs.cs }}
         shell: bash
         run: |
           set -euo pipefail
@@ -123,10 +123,10 @@ jobs:
       - name: 承認後に同一Change Setを実行
         if: inputs.phase == 'apply'
         env:
-          PR: ${ inputs.pull_request_number }}
-          SHA: ${ inputs.source_sha }}
-          STACK: ${ steps.source.outputs.stack }}
-          CS: ${ steps.source.outputs.cs }}
+          PR: ${{ inputs.pull_request_number }}
+          SHA: ${{ inputs.source_sha }}
+          STACK: ${{ steps.source.outputs.stack }}
+          CS: ${{ steps.source.outputs.cs }}
         shell: bash
         run: |
           set -euo pipefail
