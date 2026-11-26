@@ -1,0 +1,159 @@
+name: Parent resource workflow v2
+run-name: Parent resource workflow v2 ${{ github.event_name }} ${{ github.run_id }}-${{ github.run_attempt }}
+
+on:
+  # PR作成・更新後に、承認前の事前処理を開始します。
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+  # main宛てPRの承認後に、後処理を開始します。
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  plan-and-dispatch:
+    if: github.event_name == 'pull_request' || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && github.event.pull_request.base.ref == 'main')
+    name: 差分を計画し、共通子ワークフローを順次実行
+    runs-on: ubuntu-latest
+    steps:
+      - name: PRベース側の信頼できる定義をチェックアウト
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: 実行対象を計画
+        id: plan
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # PRブランチのマニフェストはデータとして読むだけにし、計画生成コードはベース側の信頼できる版を使います。
+          git fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
+          git show "$PR_HEAD_SHA:depend.txt" > "$RUNNER_TEMP/depend.txt"
+
+          # PR作成・更新とPR承認は別々のイベント実行です。
+          # どちらも同じPRのベースSHAとヘッドSHAから同じ対象サービスを計画します。
+          base_sha="$PR_BASE_SHA"
+          head_sha="$PR_HEAD_SHA"
+          target_ref="$PR_BASE_REF"
+
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            phase="prepare"
+            phase_label="承認前の事前処理"
+          else
+            phase="apply"
+            phase_label="承認後の後処理"
+          fi
+
+          git diff --name-only "$base_sha" "$head_sha" > "$RUNNER_TEMP/changed-files.txt"
+          python .github/scripts/create-resource-plan.py \
+            --manifest "$RUNNER_TEMP/depend.txt" \
+            --changed-files "$RUNNER_TEMP/changed-files.txt" \
+            --output "$RUNNER_TEMP/resource-plan.json"
+
+          plan_file="$RUNNER_TEMP/resource-plan.json"
+          has_changes=$(jq -r '(.execution_order | length) > 0' "$plan_file")
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "phase_label=$phase_label" >> "$GITHUB_OUTPUT"
+          echo "target_ref=$target_ref" >> "$GITHUB_OUTPUT"
+          echo "plan_file=$plan_file" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## $phase_label"
+            echo
+            echo "対象PR: #$PR_NUMBER"
+            echo "対象コミット: $head_sha"
+            echo
+            echo "変更ファイル:"
+            if [[ -s "$RUNNER_TEMP/changed-files.txt" ]]; then
+              sed 's/^/- /' "$RUNNER_TEMP/changed-files.txt"
+            else
+              echo "- (なし)"
+            fi
+            echo
+            echo "順次処理するサービス:"
+            if [[ "$has_changes" == "true" ]]; then
+              jq -r '.execution_order[] | "- " + .' "$plan_file"
+            else
+              echo "- 対象なし。共通子ワークフローは起動しません。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 対象サービスごとに共通子ワークフローを起動し、完了を待つ
+        if: steps.plan.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REF: ${{ steps.plan.outputs.target_ref }}
+          PLAN_FILE: ${{ steps.plan.outputs.plan_file }}
+          PHASE: ${{ steps.plan.outputs.phase }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t services < <(jq -r '.execution_order[]' "$PLAN_FILE")
+          index=0
+          for service in "${services[@]}"; do
+            service_display=$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')
+            workflow_file="childresource.yaml"
+            workflow_path=".github/workflows/$workflow_file"
+            if [[ ! -f "$workflow_path" ]]; then
+              echo "共通子ワークフローが見つかりません: $workflow_path" >&2
+              exit 1
+            fi
+
+            index=$((index + 1))
+            request_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$index"
+            expected_title="Echo $service_display from parent $request_id"
+
+            echo "共通子ワークフローを起動します: $service_display ($PHASE)"
+            gh workflow run "$workflow_file" \
+              --ref "$TARGET_REF" \
+              --field "service_name=$service_display" \
+              --field "request_id=$request_id" \
+              --field "phase=$PHASE" \
+              --field "pull_request_number=$PR_NUMBER" \
+              --field "source_sha=$SOURCE_SHA"
+
+            # 起動直後は実行一覧への反映に時間がかかることがあるため、最大約1分間ポーリングして実行IDを取得します。
+            child_run_id=""
+            for attempt in {1..30}; do
+              child_run_id=$(gh run list \
+                --workflow "$workflow_file" \
+                --branch "$TARGET_REF" \
+                --event workflow_dispatch \
+                --limit 50 \
+                --json databaseId,displayTitle \
+                | jq -r --arg title "$expected_title" '.[] | select(.displayTitle == $title) | .databaseId' \
+                | head -n 1)
+
+              if [[ -n "$child_run_id" ]]; then
+                break
+              fi
+              sleep 2
+            done
+
+            if [[ -z "$child_run_id" ]]; then
+              echo "子ワークフローの実行IDを取得できません: $request_id" >&2
+              exit 1
+            fi
+
+            gh run watch "$child_run_id" --exit-status --interval 2
+          done
