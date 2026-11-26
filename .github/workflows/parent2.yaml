@@ -158,7 +158,8 @@ jobs:
               --field "phase=$PHASE" \
               --field "pull_request_number=$PR_NUMBER" \
               --field "source_sha=$SOURCE_SHA" \
-              --field "changed_services=$CHANGED_SERVICES" \\\n              --field "review_submitted_at=$REVIEW_SUBMITTED_AT"
+              --field "changed_services=$CHANGED_SERVICES" \
+              --field "review_submitted_at=$REVIEW_SUBMITTED_AT"
 
             # 起動直後は実行一覧への反映に時間がかかることがあるため、最大約1分間ポーリングして実行IDを取得します。
             child_run_id=""
