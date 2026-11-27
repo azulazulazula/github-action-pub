@@ -25,6 +25,10 @@ on:
         description: PRコミットSHA
         required: false
         type: string
+      review_submitted_at:
+        description: 対象コミットへのPR承認時刻
+        required: false
+        type: string
       changed_services:
         description: PRで直接変更されたサービス（カンマ区切り）
         required: false
@@ -128,12 +132,21 @@ jobs:
           SHA: ${{ inputs.source_sha }}
           STACK: ${{ steps.source.outputs.stack }}
           CS: ${{ steps.source.outputs.cs }}
+          REVIEW_SUBMITTED_AT: ${{ inputs.review_submitted_at }}
         shell: bash
         run: |
           set -euo pipefail
           d=$(aws cloudformation describe-change-set --stack-name "$STACK" --change-set-name "$CS" --output json) || { echo "事前Change Setがありません" >&2; exit 1; }
           desc=$(jq -r '.Description // ""' <<<"$d")
           [[ "$desc" == *"PR #$PR source $SHA"* ]] || { echo "PR番号またはSHA不一致のため停止します" >&2; exit 1; }
+
+          # Change Setが今回のPR承認より前に作られていなければ、リソース変更を拒否する。
+          created_at=$(jq -r '.CreationTime // ""' <<<"$d")
+          [[ -n "$REVIEW_SUBMITTED_AT" && -n "$created_at" ]] || { echo "PR承認時刻またはChange Set作成時刻がありません" >&2; exit 1; }
+          created_epoch=$(date -u -d "$created_at" +%s)
+          approved_epoch=$(date -u -d "$REVIEW_SUBMITTED_AT" +%s)
+          [[ "$created_epoch" -lt "$approved_epoch" ]] || { echo "Change SetがPR承認より後に作成されたため実行しません。事前処理完了後にPRを再承認してください。" >&2; exit 1; }
+
           status=$(jq -r '.Status' <<<"$d"); reason=$(jq -r '.StatusReason // ""' <<<"$d")
           if [[ "$status" == FAILED ]] && grep -Eqi "did(n't| not) contain changes|no updates are to be performed" <<<"$reason"; then echo "変更なしのため実行をスキップしました" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
           [[ "$status" == CREATE_COMPLETE ]] || { echo "実行不可: $status $reason" >&2; exit 1; }

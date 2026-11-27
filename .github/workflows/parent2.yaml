@@ -18,6 +18,7 @@ on:
 permissions:
   contents: read
   actions: write
+  pull-requests: write
 
 jobs:
   plan-and-dispatch:
@@ -30,6 +31,17 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+
+      # 事前処理が終わるまで、PRをレビュー・マージ可能な状態にしない。
+      - name: 事前処理中はPRをDraftにする
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+        run: |
+          gh api graphql \
+            -f query='mutation($pullRequestId: ID!) { convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) { pullRequest { isDraft } } }' \
+            -F pullRequestId="$PR_NODE_ID"
 
       - name: 実行対象を計画
         id: plan
@@ -97,7 +109,18 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: 承認処理の開始時もPRをDraftにする
+        if: github.event_name == 'pull_request_review' && github.event.pull_request.draft == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+        run: |
+          gh api graphql \
+            -f query='mutation($pullRequestId: ID!) { convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) { pullRequest { isDraft } } }' \
+            -F pullRequestId="$PR_NODE_ID"
+
       - name: 対象サービスごとに共通子ワークフローを起動し、完了を待つ
+        id: dispatch
         if: steps.plan.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,6 +130,7 @@ jobs:
           PHASE: ${{ steps.plan.outputs.phase }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_SUBMITTED_AT: ${{ github.event.review.submitted_at }}
         shell: bash
         run: |
           set -euo pipefail
@@ -134,7 +158,8 @@ jobs:
               --field "phase=$PHASE" \
               --field "pull_request_number=$PR_NUMBER" \
               --field "source_sha=$SOURCE_SHA" \
-              --field "changed_services=$CHANGED_SERVICES"
+              --field "changed_services=$CHANGED_SERVICES" \
+              --field "review_submitted_at=$REVIEW_SUBMITTED_AT"
 
             # 起動直後は実行一覧への反映に時間がかかることがあるため、最大約1分間ポーリングして実行IDを取得します。
             child_run_id=""
@@ -161,3 +186,14 @@ jobs:
 
             gh run watch "$child_run_id" --exit-status --interval 2
           done
+
+      # Change Set作成・実行の成功後にだけ、PRをレビュー可能に戻す。
+      - name: 処理成功後にPRをレビュー可能にする
+        if: success() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_review')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+        run: |
+          gh api graphql \
+            -f query='mutation($pullRequestId: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $pullRequestId}) { pullRequest { isDraft } } }' \
+            -F pullRequestId="$PR_NODE_ID"
